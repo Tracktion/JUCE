@@ -2201,14 +2201,20 @@ private:
                                       (pointer_sized_int) &canonicalIn.get(), (void*) &canonicalOut.get(), 0.0f);
         }
 
-        const auto arrangement = getSpeakerArrangementWrapper (effect);
+        HeapBlock<Vst2::VstSpeakerArrangement> inArrBlock (1, true), outArrBlock (1, true);
+
+        auto* inArr  = inArrBlock.get();
+        auto* outArr = outArrBlock.get();
+
+        if (! getSpeakerArrangementWrapper (effect, inArr, outArr))
+            inArr = outArr = nullptr;
 
         for (int dir = 0; dir < 2; ++dir)
         {
             const bool isInput = (dir == 0);
             const int opcode = (isInput ? Vst2::effGetInputProperties : Vst2::effGetOutputProperties);
             const int maxChannels = (isInput ? effect->numInputs : effect->numOutputs);
-            const auto* arr = (isInput ? arrangement.in : arrangement.out);
+            const Vst2::VstSpeakerArrangement* arr = (isInput ? inArr : outArr);
             bool busAdded = false;
 
             Vst2::VstPinProperties pinProps;
@@ -2259,7 +2265,12 @@ private:
 
     static bool pluginHasDefaultChannelLayouts (Vst2::AEffect* effect)
     {
-        if (getSpeakerArrangementWrapper (effect).isValid())
+        HeapBlock<Vst2::VstSpeakerArrangement> inArrBlock (1, true), outArrBlock (1, true);
+
+        auto* inArr  = inArrBlock.get();
+        auto* outArr = outArrBlock.get();
+
+        if (getSpeakerArrangementWrapper (effect, inArr, outArr))
             return true;
 
         for (int dir = 0; dir < 2; ++dir)
@@ -2287,35 +2298,19 @@ private:
         return false;
     }
 
-    struct SpeakerArrangements
-    {
-        const Vst2::VstSpeakerArrangement* in;
-        const Vst2::VstSpeakerArrangement* out;
-
-        bool isValid() const noexcept { return in != nullptr && out != nullptr; }
-    };
-
-    static SpeakerArrangements getSpeakerArrangementWrapper (Vst2::AEffect* effect)
+    static bool getSpeakerArrangementWrapper (Vst2::AEffect* effect,
+                                              Vst2::VstSpeakerArrangement* inArr,
+                                              Vst2::VstSpeakerArrangement* outArr)
     {
         // Workaround: unfortunately old JUCE VST-2 plug-ins had a bug and would crash if
         // you try to get the speaker arrangement when there are no input channels present.
         // Hopefully, one day (when there are no more old JUCE plug-ins around), we can
         // comment out the next two lines.
         if (effect->numInputs == 0)
-            return { nullptr, nullptr };
+            return false;
 
-        SpeakerArrangements result;
-        const auto dispatchResult = effect->dispatcher (effect,
-                                                        Vst2::effGetSpeakerArrangement,
-                                                        0,
-                                                        reinterpret_cast<pointer_sized_int> (&result.in),
-                                                        &result.out,
-                                                        0.0f);
-
-        if (dispatchResult != 0)
-            return result;
-
-        return { nullptr, nullptr };
+        return (effect->dispatcher (effect, Vst2::effGetSpeakerArrangement, 0,
+                                          reinterpret_cast<pointer_sized_int> (&inArr), &outArr, 0.0f) != 0);
     }
 
     //==============================================================================
