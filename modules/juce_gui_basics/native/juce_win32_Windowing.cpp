@@ -4160,7 +4160,7 @@ private:
 
     void windowShouldDismissModals (HWND originator)
     {
-        if (component.isShowing() && isAncestor (originator, hwnd))
+        if (isAncestor (originator, hwnd))
             sendInputAttemptWhenModalMessage();
     }
 
@@ -4190,7 +4190,6 @@ private:
 
             constexpr UINT events[] { WM_MOVE,
                                       WM_SIZE,
-                                      WM_WINDOWPOSCHANGING,
                                       WM_NCPOINTERDOWN,
                                       WM_NCLBUTTONDOWN,
                                       WM_NCRBUTTONDOWN,
@@ -4198,17 +4197,6 @@ private:
 
             if (std::find (std::begin (events), std::end (events), info->message) == std::end (events))
                 return;
-
-            if (info->message == WM_WINDOWPOSCHANGING)
-            {
-                const auto* windowPos = reinterpret_cast<const WINDOWPOS*> (info->lParam);
-                const auto windowPosFlags = windowPos->flags;
-
-                constexpr auto maskToCheck = SWP_NOMOVE | SWP_NOSIZE;
-
-                if ((windowPosFlags & maskToCheck) == maskToCheck)
-                    return;
-            }
 
             // windowMayDismissModals could affect the number of active ComponentPeer instances
             for (auto i = ComponentPeer::getNumPeers(); --i >= 0;)
