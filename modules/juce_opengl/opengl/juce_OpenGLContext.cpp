@@ -335,8 +335,9 @@ public:
 
     void bindVertexArray() noexcept
     {
-        if (vertexArrayObject != 0)
-            context.extensions.glBindVertexArray (vertexArrayObject);
+        if (openGLVersion.major >= 3)
+            if (vertexArrayObject != 0)
+                context.extensions.glBindVertexArray (vertexArrayObject);
     }
 
     void checkViewportBounds()
@@ -534,7 +535,9 @@ public:
 
         gl::loadFunctions();
 
-        if (OpenGLShaderProgram::getLanguageVersion() > 1.2)
+        openGLVersion = getOpenGLVersion();
+
+        if (openGLVersion.major >= 3)
         {
             context.extensions.glGenVertexArrays (1, &vertexArrayObject);
             bindVertexArray();
@@ -544,9 +547,11 @@ public:
 
         nativeContext->setSwapInterval (1);
 
+       #if ! JUCE_OPENGL_ES
         JUCE_CHECK_OPENGL_ERROR
         shadersAvailable = OpenGLShaderProgram::getLanguageVersion() > 0;
         clearGLError();
+       #endif
 
         textureNpotSupported = contextHasTextureNpotFeature();
 
@@ -669,6 +674,7 @@ public:
     OpenGLContext& context;
     Component& component;
 
+    Version openGLVersion;
     OpenGLFrameBuffer cachedImageFrameBuffer;
     RectangleList<int> validArea;
     Rectangle<int> viewportArea, lastScreenBounds;
