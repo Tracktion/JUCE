@@ -1724,6 +1724,7 @@
     <ClInclude Include="..\..\..\..\modules\juce_core\memory\juce_Singleton.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\memory\juce_WeakReference.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\misc\juce_ConsoleApplication.h"/>
+    <ClInclude Include="..\..\..\..\modules\juce_core\misc\juce_Functional.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\misc\juce_Result.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\misc\juce_RuntimePermissions.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\misc\juce_Uuid.h"/>
@@ -2132,7 +2133,6 @@
     <None Include="..\..\Source\BinaryData\Icons\export_visualStudio.svg"/>
     <None Include="..\..\Source\BinaryData\Icons\export_xcode.svg"/>
     <None Include="..\..\Source\BinaryData\Icons\gpl_logo.svg"/>
-    <None Include="..\..\Source\BinaryData\Icons\juce-logo-with-text.svg"/>
     <None Include="..\..\Source\BinaryData\Icons\juce_icon.png"/>
     <None Include="..\..\Source\BinaryData\Icons\wizard_AnimatedApp.svg"/>
     <None Include="..\..\Source\BinaryData\Icons\wizard_AudioApp.svg"/>
