@@ -261,20 +261,14 @@ private:
 #endif
 
 //==============================================================================
-class ScopedThreadLocalBooleanSetter
+class InParameterChangedCallbackSetter
 {
 public:
-    explicit ScopedThreadLocalBooleanSetter (ThreadLocalValue<bool>& ref)
-        : toSet (ref)
-    {
-        jassert (! toSet.get());
-        toSet = true;
-    }
-
-    ~ScopedThreadLocalBooleanSetter() noexcept { toSet = false; }
+    explicit InParameterChangedCallbackSetter (bool& ref)
+        : inner ([&]() -> auto& { jassert (! ref); return ref; }(), true, false) {}
 
 private:
-    ThreadLocalValue<bool>& toSet;
+    ScopedValueSetter<bool> inner;
 };
 
 template <typename Member>
@@ -656,7 +650,7 @@ private:
 
 class JuceVST3Component;
 
-static ThreadLocalValue<bool> inParameterChangedCallback;
+static thread_local bool inParameterChangedCallback = false;
 
 //==============================================================================
 class JuceVST3EditController : public Vst::EditController,
@@ -786,7 +780,7 @@ public:
 
                     param.setValue (value);
 
-                    ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+                    const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
                     param.sendValueChangedMessageToListeners (value);
                 }
 
@@ -1214,7 +1208,7 @@ public:
 
     void paramChanged (Steinberg::int32 parameterIndex, Vst::ParamID vstParamId, double newValue)
     {
-        if (inParameterChangedCallback.get())
+        if (inParameterChangedCallback)
             return;
 
         if (MessageManager::getInstance()->isThisTheMessageThread())
@@ -2377,7 +2371,7 @@ public:
             auto floatValue = (shouldBeBypassed ? 1.0f : 0.0f);
             bypassParam->setValue (floatValue);
 
-            ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+            const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
             bypassParam->sendValueChangedMessageToListeners (floatValue);
         }
     }
@@ -3107,7 +3101,7 @@ public:
                         {
                             param->setValue (floatValue);
 
-                            ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+                            const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
                             param->sendValueChangedMessageToListeners (floatValue);
                         }
                     }
