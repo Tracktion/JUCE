@@ -28,8 +28,6 @@ namespace juce
 
 AccessibilityHandler* AccessibilityHandler::currentlyFocusedHandler = nullptr;
 
-bool areAnyAccessibilityClientsActive();
-
 enum class InternalAccessibilityEvent
 {
     elementCreated,
@@ -319,10 +317,7 @@ void AccessibilityHandler::grabFocusInternal (bool canTryParent)
 void AccessibilityHandler::giveAwayFocusInternal() const
 {
     currentlyFocusedHandler = nullptr;
-
-    if (auto* focusedComponent = Component::getCurrentlyFocusedComponent())
-        if (auto* handler = focusedComponent->getAccessibilityHandler())
-            handler->grabFocus();
+    notifyAccessibilityEventInternal (*this, InternalAccessibilityEvent::focusChanged);
 }
 
 void AccessibilityHandler::takeFocus()
