@@ -1056,7 +1056,13 @@ namespace IconConverters
             header.bV5GreenMask = 0x0000FF00;
             header.bV5BlueMask = 0x000000FF;
             header.bV5AlphaMask = 0xFF000000;
+
+           #if JUCE_MINGW
+            header.bV5CSType = 'Win ';
+           #else
             header.bV5CSType = LCS_WINDOWS_COLOR_SPACE;
+           #endif
+
             header.bV5Intent = LCS_GM_IMAGES;
             JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
@@ -1504,7 +1510,7 @@ public:
         if (! hasMoved)    flags |= SWP_NOMOVE;
         if (! hasResized)  flags |= SWP_NOSIZE;
 
-        setWindowPos (hwnd, newBounds, flags, ! isInDPIChange);
+        setWindowPos (hwnd, newBounds, flags, numInDpiChange == 0);
 
         if (hasResized && isValidPeer (this))
         {
@@ -2021,7 +2027,7 @@ private:
    #endif
 
     double scaleFactor = 1.0;
-    bool isInDPIChange = false;
+    int numInDpiChange = 0;
 
     bool isAccessibilityActive = false;
 
@@ -3365,28 +3371,33 @@ private:
 
     LRESULT handleDPIChanging (int newDPI, RECT newRect)
     {
-        auto newScale = (double) newDPI / USER_DEFAULT_SCREEN_DPI;
+        const auto newScale = (double) newDPI / USER_DEFAULT_SCREEN_DPI;
 
-        if (! approximatelyEqual (scaleFactor, newScale))
+        if (approximatelyEqual (scaleFactor, newScale))
+            return 0;
+
+        const auto oldScale = std::exchange (scaleFactor, newScale);
+
         {
-            auto oldScale = scaleFactor;
-            scaleFactor = newScale;
-
-            {
-                const ScopedValueSetter<bool> setter (isInDPIChange, true);
-                setBounds (windowBorder.subtractedFrom (convertPhysicalScreenRectangleToLogical (rectangleFromRECT (newRect), hwnd)), fullScreen);
-            }
-
-            updateShadower();
-            InvalidateRect (hwnd, nullptr, FALSE);
-
-            ChildWindowCallbackData callbackData;
-            callbackData.scaleRatio = (float) (scaleFactor / oldScale);
-
-            EnumChildWindows (hwnd, getChildWindowRectCallback, (LPARAM) &callbackData);
-            scaleFactorListeners.call ([&] (ScaleFactorListener& l) { l.nativeScaleFactorChanged (scaleFactor); });
-            EnumChildWindows (hwnd, scaleChildWindowCallback, (LPARAM) &callbackData);
+            const ScopedValueSetter<int> setter (numInDpiChange, numInDpiChange + 1);
+            setBounds (windowBorder.subtractedFrom (convertPhysicalScreenRectangleToLogical (rectangleFromRECT (newRect), hwnd)), fullScreen);
         }
+
+        // This is to handle reentrancy. If responding to a DPI change triggers further DPI changes,
+        // we should only notify listeners and resize windows once all of the DPI changes have
+        // resolved.
+        if (numInDpiChange != 0)
+            return 0;
+
+        updateShadower();
+        InvalidateRect (hwnd, nullptr, FALSE);
+
+        ChildWindowCallbackData callbackData;
+        callbackData.scaleRatio = (float) (scaleFactor / oldScale);
+
+        EnumChildWindows (hwnd, getChildWindowRectCallback, (LPARAM) &callbackData);
+        scaleFactorListeners.call ([this] (ScaleFactorListener& l) { l.nativeScaleFactorChanged (scaleFactor); });
+        EnumChildWindows (hwnd, scaleChildWindowCallback, (LPARAM) &callbackData);
 
         return 0;
     }
@@ -3933,7 +3944,7 @@ private:
 
             case WM_IME_SETCONTEXT:
                 imeHandler.handleSetContext (h, wParam == TRUE);
-                lParam &= ~ISC_SHOWUICOMPOSITIONWINDOW;
+                lParam &= ~(LPARAM) ISC_SHOWUICOMPOSITIONWINDOW;
                 break;
 
             case WM_IME_STARTCOMPOSITION:  imeHandler.handleStartComposition (*this); return 0;
@@ -4080,7 +4091,7 @@ private:
 
         String getCompositionString (HIMC hImc, const DWORD type) const
         {
-            jassert (hImc != nullptr);
+            jassert (hImc != HIMC{});
 
             const auto stringSizeBytes = ImmGetCompositionString (hImc, type, nullptr, 0);
 
@@ -4097,7 +4108,7 @@ private:
 
         int getCompositionCaretPos (HIMC hImc, LPARAM lParam, const String& currentIMEString) const
         {
-            jassert (hImc != nullptr);
+            jassert (hImc != HIMC{});
 
             if ((lParam & CS_NOMOVECARET) != 0)
                 return compositionRange.getStart();
@@ -4115,7 +4126,7 @@ private:
         // returned range is relative to beginning of TextInputTarget, not composition string
         Range<int> getCompositionSelection (HIMC hImc, LPARAM lParam) const
         {
-            jassert (hImc != nullptr);
+            jassert (hImc != HIMC{});
             int selectionStart = 0;
             int selectionEnd = 0;
 
@@ -4163,7 +4174,7 @@ private:
         {
             Array<Range<int>> result;
 
-            if (hImc != nullptr && (lParam & GCS_COMPCLAUSE) != 0)
+            if (hImc != HIMC{} && (lParam & GCS_COMPCLAUSE) != 0)
             {
                 auto clauseDataSizeBytes = ImmGetCompositionString (hImc, GCS_COMPCLAUSE, nullptr, 0);
 
@@ -4910,12 +4921,14 @@ void Desktop::allowedOrientationsChanged() {}
 static const Displays::Display* getCurrentDisplayFromScaleFactor (HWND hwnd)
 {
     Array<const Displays::Display*> candidateDisplays;
-    double scaleToLookFor = -1.0;
 
-    if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
-        scaleToLookFor = peer->getPlatformScaleFactor();
-    else
-        scaleToLookFor = getScaleFactorForWindow (hwnd);
+    const auto scaleToLookFor = [&]
+    {
+        if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
+            return peer->getPlatformScaleFactor();
+
+        return getScaleFactorForWindow (hwnd);
+    }();
 
     auto globalScale = Desktop::getInstance().getGlobalScaleFactor();
 
@@ -4928,12 +4941,13 @@ static const Displays::Display* getCurrentDisplayFromScaleFactor (HWND hwnd)
         if (candidateDisplays.size() == 1)
             return candidateDisplays[0];
 
-        Rectangle<int> bounds;
+        const auto bounds = [&]
+        {
+            if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
+                return peer->getComponent().getTopLevelComponent()->getBounds();
 
-        if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
-            bounds = peer->getComponent().getTopLevelComponent()->getBounds();
-        else
-            bounds = Desktop::getInstance().getDisplays().physicalToLogical (rectangleFromRECT (getWindowScreenRect (hwnd)));
+            return Desktop::getInstance().getDisplays().physicalToLogical (rectangleFromRECT (getWindowScreenRect (hwnd)));
+        }();
 
         const Displays::Display* retVal = nullptr;
         int maxArea = -1;
