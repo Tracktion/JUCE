@@ -174,7 +174,7 @@ void TableHeaderComponent::setColumnWidth (const int columnId, const int newWidt
 {
     if (auto* ci = getInfoForId (columnId))
     {
-        if (ci->width != newWidth)
+        if (ci->width != jlimit (ci->minimumWidth, ci->maximumWidth, newWidth))
         {
             auto numColumns = getNumColumns (true);
 
