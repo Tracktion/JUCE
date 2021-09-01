@@ -328,7 +328,7 @@ struct VST3HostContext  : public Vst::IComponentHandler,  // From VST V3.0.0
         attributeList = new AttributeList (this);
     }
 
-    virtual ~VST3HostContext() override {}
+    ~VST3HostContext() override = default;
 
     JUCE_DECLARE_VST3_COM_REF_METHODS
 
@@ -2911,11 +2911,16 @@ public:
         jassert (editController != nullptr);
 
         warnOnFailureIfImplemented (editController->setComponentState (&stream));
+        resetParameters();
+    }
 
+    void resetParameters()
+    {
         for (auto* parameter : getParameters())
         {
             auto* vst3Param = static_cast<VST3Parameter*> (parameter);
-            vst3Param->setValueWithoutUpdatingProcessor ((float) editController->getParamNormalized (vst3Param->getParamID()));
+            const auto value = (float) editController->getParamNormalized (vst3Param->getParamID());
+            vst3Param->setValueWithoutUpdatingProcessor (value);
         }
     }
 
@@ -3532,6 +3537,9 @@ void VST3HostContext::restartComponentOnMessageThread (int32 flags)
 
     if (hasFlag (flags, Vst::kMidiCCAssignmentChanged))
         plugin->updateMidiMappings();
+
+    if (hasFlag (flags, Vst::kParamValuesChanged))
+        plugin->resetParameters();
 
     plugin->updateHostDisplay (AudioProcessorListener::ChangeDetails().withProgramChanged (true)
                                                                       .withParameterInfoChanged (true));
