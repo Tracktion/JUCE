@@ -23,6 +23,8 @@
   ==============================================================================
 */
 
+static void juceFreeAccessibilityPlatformSpecificData (NSAccessibilityElement<NSAccessibility>*)  {}
+
 namespace juce
 {
 
@@ -276,6 +278,19 @@ private:
                     [accessibleChildren addObject: (id) childHandler->getNativeImplementation()];
 
                 return accessibleChildren;
+            }
+
+            return nil;
+        }
+
+        static id getAccessibilityValue (id self, SEL)
+        {
+            if (auto* handler = getHandler (self))
+            {
+                if (handler->getCurrentState().isCheckable())
+                    return handler->getCurrentState().isChecked() ? @(1) : @(0);
+
+                return getAccessibilityValueFromInterfaces (*handler);
             }
 
             return nil;
