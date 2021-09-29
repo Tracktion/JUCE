@@ -447,7 +447,7 @@ public:
         virtual void progress (DownloadTask* task, int64 bytesDownloaded, int64 totalLength);
     };
 
-    /** Holds options that will can be specified when starting a new download
+    /** Holds options that can be specified when starting a new download
         with downloadToFile().
     */
     class DownloadTaskOptions
@@ -659,14 +659,14 @@ public:
     static URL createWithoutParsing (const String& url);
 
     //==============================================================================
+   #ifndef DOXYGEN
     using OpenStreamProgressCallback = bool (void* context, int bytesSent, int totalBytes);
 
     /** This method has been deprecated.
 
-        New code should use the method which takes an InputStreamOptions argument instead.
-
         @see InputStreamOptions
     */
+    [[deprecated ("New code should use the method which takes an InputStreamOptions argument instead.")]]
     std::unique_ptr<InputStream> createInputStream (bool doPostLikeRequest,
                                                     OpenStreamProgressCallback* progressCallback = nullptr,
                                                     void* progressCallbackContext = nullptr,
@@ -676,6 +676,7 @@ public:
                                                     int* statusCode = nullptr,
                                                     int numRedirectsToFollow = 5,
                                                     String httpRequestCmd = {}) const;
+   #endif
 
 private:
     //==============================================================================
