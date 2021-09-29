@@ -163,11 +163,10 @@ bool XWindowSystemUtilities::Atoms::isMimeTypeFile (::Display* display, Atom ato
 }
 
 //==============================================================================
-XWindowSystemUtilities::GetXProperty::GetXProperty (Window window, Atom atom, long offset,
-                                                    long length, bool shouldDelete, Atom requestedType)
+XWindowSystemUtilities::GetXProperty::GetXProperty (::Display* display, Window window, Atom atom,
+                                                    long offset, long length, bool shouldDelete, Atom requestedType)
 {
-    success = (X11Symbols::getInstance()->xGetWindowProperty (XWindowSystem::getInstance()->getDisplay(),
-                                                              window, atom, offset, length,
+    success = (X11Symbols::getInstance()->xGetWindowProperty (display, window, atom, offset, length,
                                                               (Bool) shouldDelete, requestedType, &actualType,
                                                               &actualFormat, &numItems, &bytesLeft, &data) == Success)
                 && data != nullptr;
@@ -177,6 +176,148 @@ XWindowSystemUtilities::GetXProperty::~GetXProperty()
 {
     if (data != nullptr)
         X11Symbols::getInstance()->xFree (data);
+}
+
+//==============================================================================
+XWindowSystemUtilities::XSettings::XSettings (::Display* d)
+    : display (d)
+{
+    settingsAtom = Atoms::getCreating (display, "_XSETTINGS_SETTINGS");
+
+    settingsWindow = X11Symbols::getInstance()->xGetSelectionOwner (display,
+                                                                    Atoms::getCreating (display, "_XSETTINGS_S0"));
+
+    jassert (settingsWindow != None);
+    update();
+}
+
+XWindowSystemUtilities::XSetting XWindowSystemUtilities::XSettings::getSetting (const String& name) const
+{
+    const auto iter = settings.find (name);
+
+    if (iter != settings.end())
+        return iter->second;
+
+    return {};
+}
+
+void XWindowSystemUtilities::XSettings::update()
+{
+    const GetXProperty prop { display,
+                              settingsWindow,
+                              settingsAtom,
+                              0L,
+                              std::numeric_limits<long>::max(),
+                              false,
+                              settingsAtom };
+
+    if (prop.success
+        && prop.actualType == settingsAtom
+        && prop.actualFormat == 8
+        && prop.numItems > 0)
+    {
+        const auto bytes = (size_t) prop.numItems;
+        auto* data = prop.data;
+        size_t byteNum = 0;
+
+        const auto increment = [&] (size_t amount)
+        {
+            data    += amount;
+            byteNum += amount;
+        };
+
+        struct Header
+        {
+            CARD8 byteOrder;
+            CARD8 padding[3];
+            CARD32 serial;
+            CARD32 nSettings;
+        };
+
+        const auto* header = reinterpret_cast<const Header*> (data);
+        const auto headerSerial = (int) header->serial;
+        increment (sizeof (Header));
+
+        const auto readCARD16 = [&]() -> CARD16
+        {
+            if (byteNum + sizeof (CARD16) > bytes)
+                return {};
+
+            const auto value = header->byteOrder == MSBFirst ? ByteOrder::bigEndianShort (data)
+                                                             : ByteOrder::littleEndianShort (data);
+            increment (sizeof (CARD16));
+            return value;
+        };
+
+        const auto readCARD32 = [&]() -> CARD32
+        {
+            if (byteNum + sizeof (CARD32) > bytes)
+                return {};
+
+            const auto value = header->byteOrder == MSBFirst ? ByteOrder::bigEndianInt (data)
+                                                             : ByteOrder::littleEndianInt (data);
+            increment (sizeof (CARD32));
+            return value;
+        };
+
+        const auto readString = [&] (size_t nameLen) -> String
+        {
+            const auto padded = (nameLen + 3) & (~(size_t) 3);
+
+            if (byteNum + padded > bytes)
+                return {};
+
+            auto* ptr = reinterpret_cast<const char*> (data);
+            const String result (ptr, nameLen);
+            increment (padded);
+            return result;
+        };
+
+        CARD16 setting = 0;
+
+        while (byteNum < bytes && setting < header->nSettings)
+        {
+            const auto type = *reinterpret_cast<const char*> (data);
+            increment (2);
+
+            const auto name   = readString (readCARD16());
+            const auto serial = (int) readCARD32();
+
+            enum { XSettingsTypeInteger, XSettingsTypeString, XSettingsTypeColor };
+
+            const auto parsedSetting = [&]() -> XSetting
+            {
+                switch (type)
+                {
+                    case XSettingsTypeInteger:
+                        return { name, (int) readCARD32() };
+
+                    case XSettingsTypeString:
+                        return { name, readString (readCARD32()) };
+
+                    case XSettingsTypeColor:
+                        // Order is important, these should be kept as separate statements!
+                        const auto r = (uint8) readCARD16();
+                        const auto g = (uint8) readCARD16();
+                        const auto b = (uint8) readCARD16();
+                        const auto a = (uint8) readCARD16();
+                        return { name, Colour { r, g, b, a } };
+                }
+
+                return {};
+            }();
+
+            if (serial > lastUpdateSerial)
+            {
+                settings[parsedSetting.name] = parsedSetting;
+                listeners.call ([&parsedSetting] (Listener& l) { l.settingChanged (parsedSetting); });
+            }
+
+            setting += 1;
+        }
+
+        lastUpdateSerial = headerSerial;
+    }
 }
 
 //==============================================================================
@@ -946,158 +1087,6 @@ private:
 //=============================== X11 - Displays ===============================
 namespace DisplayHelpers
 {
-    template <typename Callback>
-    void parseXSettings (const unsigned char* dataPtr, const size_t bytes, Callback&& callback)
-    {
-        struct Header
-        {
-            CARD8 byteOrder;
-            CARD8 padding[3];
-            CARD32 serial;
-            CARD32 nSettings;
-        };
-
-        auto* data     = dataPtr;
-        size_t byteNum = 0;
-
-        const auto increment = [&] (size_t amount)
-        {
-            data    += amount;
-            byteNum += amount;
-        };
-
-        const auto* header = reinterpret_cast<const Header*> (data);
-        increment (sizeof (Header));
-
-        const auto readCARD16 = [&]() -> CARD16
-        {
-            if (byteNum + sizeof (CARD16) > bytes)
-                return {};
-
-            const auto value = header->byteOrder == MSBFirst ? ByteOrder::bigEndianShort (data)
-                                                             : ByteOrder::littleEndianShort (data);
-            increment (sizeof (CARD16));
-            return value;
-        };
-
-        const auto readCARD32 = [&]() -> CARD32
-        {
-            if (byteNum + sizeof (CARD32) > bytes)
-                return {};
-
-            const auto value = header->byteOrder == MSBFirst ? ByteOrder::bigEndianInt (data)
-                                                             : ByteOrder::littleEndianInt (data);
-            increment (sizeof (CARD32));
-            return value;
-        };
-
-        const auto readString = [&] (size_t nameLen) -> std::string
-        {
-            const auto padded = (nameLen + 3) & (~(size_t) 3);
-
-            if (byteNum + padded > bytes)
-                return {};
-
-            auto* ptr = reinterpret_cast<const char*> (data);
-            const std::string result (ptr, ptr + nameLen);
-            increment (padded);
-            return result;
-        };
-
-        CARD16 setting = 0;
-
-        while (byteNum < bytes && setting < header->nSettings)
-        {
-            const auto type = *reinterpret_cast<const char*> (data);
-            increment (2);
-
-            const auto name   = readString (readCARD16());
-            const auto serial = readCARD32();
-            ignoreUnused (serial);
-
-            enum { XSettingsTypeInteger, XSettingsTypeString, XSettingsTypeColor };
-
-            switch (type)
-            {
-                case XSettingsTypeInteger:
-                {
-                    callback (name, (INT32) readCARD32());
-                    break;
-                }
-
-                case XSettingsTypeString:
-                {
-                    callback (name, readString (readCARD32()));
-                    break;
-                }
-
-                case XSettingsTypeColor:
-                {
-                    // Order is important, these should be kept as separate statements!
-                    const auto r = readCARD16();
-                    const auto g = readCARD16();
-                    const auto b = readCARD16();
-                    const auto a = readCARD16();
-                    callback (name, r, g, b, a);
-                    break;
-                }
-            }
-
-            setting += 1;
-        }
-    }
-
-    double getScalingFactorFromXSettings()
-    {
-        if (auto* display = XWindowSystem::getInstance()->getDisplay())
-        {
-            using namespace XWindowSystemUtilities;
-
-            ScopedXLock xLock;
-
-            const auto selectionWindow = X11Symbols::getInstance()->xGetSelectionOwner (display,
-                                                                                        Atoms::getCreating (display, "_XSETTINGS_S0"));
-
-            if (selectionWindow != None)
-            {
-                const auto xsettingsSettingsAtom = Atoms::getCreating (display, "_XSETTINGS_SETTINGS");
-
-                const GetXProperty prop { selectionWindow,
-                                          xsettingsSettingsAtom,
-                                          0L,
-                                          std::numeric_limits<long>::max(),
-                                          false,
-                                          xsettingsSettingsAtom };
-
-                if (prop.success
-                    && prop.actualType == xsettingsSettingsAtom
-                    && prop.actualFormat == 8)
-                {
-                    struct ExtractRelevantSettings
-                    {
-                        void operator() (const std::string& name, INT32 value)
-                        {
-                            if (name == "Gdk/WindowScalingFactor")
-                                scaleFactor = value;
-                        }
-
-                        void operator() (const std::string&, const std::string&) {}
-                        void operator() (const std::string&, CARD16, CARD16, CARD16, CARD16) {}
-
-                        INT32 scaleFactor = 0;
-                    };
-
-                    ExtractRelevantSettings callback;
-                    parseXSettings (prop.data, prop.numItems, callback);
-
-                    return (double) callback.scaleFactor;
-                }
-            }
-        }
-
-        return 0.0;
-    }
-
     static double getDisplayDPI (::Display* display, int index)
     {
         auto widthMM  = X11Symbols::getInstance()->xDisplayWidthMM  (display, index);
@@ -1112,10 +1101,16 @@ namespace DisplayHelpers
 
     static double getDisplayScale (const String& name, double dpi)
     {
-        const auto scaleFactorFromXSettings = getScalingFactorFromXSettings();
+        if (auto* xSettings = XWindowSystem::getInstance()->getXSettings())
+        {
+            auto windowScalingFactorSetting = xSettings->getSetting (XWindowSystem::getWindowScalingFactorSettingName());
 
-        if (scaleFactorFromXSettings > 0.0)
-            return scaleFactorFromXSettings;
+            if (windowScalingFactorSetting.isValid()
+                && windowScalingFactorSetting.integerValue > 0)
+            {
+                return (double) windowScalingFactorSetting.integerValue;
+            }
+        }
 
         if (name.isNotEmpty())
         {
@@ -1270,7 +1265,7 @@ namespace ClipboardHelpers
     {
         if (display != nullptr)
         {
-            XWindowSystemUtilities::GetXProperty prop (window, atom, 0L, 100000, false, AnyPropertyType);
+            XWindowSystemUtilities::GetXProperty prop (display, window, atom, 0L, 100000, false, AnyPropertyType);
 
             if (prop.success)
             {
@@ -1777,7 +1772,7 @@ BorderSize<int> XWindowSystem::getBorderSize (::Window windowH) const
 
     if (hints != None)
     {
-        XWindowSystemUtilities::GetXProperty prop (windowH, hints, 0, 4, false, XA_CARDINAL);
+        XWindowSystemUtilities::GetXProperty prop (display, windowH, hints, 0, 4, false, XA_CARDINAL);
 
         if (prop.success && prop.actualFormat == 32)
         {
@@ -1859,7 +1854,7 @@ bool XWindowSystem::isMinimised (::Window windowH) const
     jassert (windowH != 0);
 
     XWindowSystemUtilities::ScopedXLock xLock;
-    XWindowSystemUtilities::GetXProperty prop (windowH, atoms.state, 0, 64, false, atoms.state);
+    XWindowSystemUtilities::GetXProperty prop (display, windowH, atoms.state, 0, 64, false, atoms.state);
 
     if (prop.success && prop.actualType == atoms.state
         && prop.actualFormat == 32 && prop.numItems > 0)
@@ -2021,6 +2016,37 @@ bool XWindowSystem::canUseARGBImages() const
    #endif
 
     return canUseARGB;
+}
+
+bool XWindowSystem::isDarkModeActive() const
+{
+    const auto themeName = [this]() -> String
+    {
+        if (xSettings != nullptr)
+        {
+            const auto themeNameSetting = xSettings->getSetting (getThemeNameSettingName());
+
+            if (themeNameSetting.isValid()
+                && themeNameSetting.stringValue.isNotEmpty())
+            {
+                return themeNameSetting.stringValue;
+            }
+        }
+
+        ChildProcess gsettings;
+
+        if (File ("/usr/bin/gsettings").existsAsFile()
+            && gsettings.start ("/usr/bin/gsettings get org.gnome.desktop.interface gtk-theme", ChildProcess::wantStdOut))
+        {
+            if (gsettings.waitForProcessToFinish (200))
+                return gsettings.readAllProcessOutput();
+        }
+
+        return {};
+    }();
+
+    return (themeName.isNotEmpty()
+          && (themeName.containsIgnoreCase ("dark") || themeName.containsIgnoreCase ("black")));
 }
 
 Image XWindowSystem::createImage (bool isSemiTransparent, int width, int height, bool argb) const
@@ -2413,7 +2439,7 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
             for (int i = 0; i < numMonitors; ++i)
             {
                 auto rootWindow = X11Symbols::getInstance()->xRootWindow (display, i);
-                XWindowSystemUtilities::GetXProperty prop (rootWindow, workAreaHints, 0, 4, false, XA_CARDINAL);
+                XWindowSystemUtilities::GetXProperty prop (display, rootWindow, workAreaHints, 0, 4, false, XA_CARDINAL);
 
                 if (! hasWorkAreaData (prop))
                     continue;
@@ -2505,7 +2531,8 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
 
             for (int i = 0; i < numMonitors; ++i)
             {
-                XWindowSystemUtilities::GetXProperty prop (X11Symbols::getInstance()->xRootWindow (display, i),
+                XWindowSystemUtilities::GetXProperty prop (display,
+                                                           X11Symbols::getInstance()->xRootWindow (display, i),
                                                            workAreaHints, 0, 4, false, XA_CARDINAL);
 
                 auto workArea = getWorkArea (prop);
@@ -2959,7 +2986,7 @@ long XWindowSystem::getUserTime (::Window windowH) const
 {
     jassert (windowH != 0);
 
-    XWindowSystemUtilities::GetXProperty prop (windowH, atoms.userTime, 0, 65536, false, XA_CARDINAL);
+    XWindowSystemUtilities::GetXProperty prop (display, windowH, atoms.userTime, 0, 65536, false, XA_CARDINAL);
 
     if (! prop.success)
         return 0;
@@ -2968,6 +2995,15 @@ long XWindowSystem::getUserTime (::Window windowH) const
     std::memcpy (&result, prop.data, sizeof (long));
 
     return result;
+}
+
+void XWindowSystem::initialiseXSettings()
+{
+    xSettings = std::make_unique<XWindowSystemUtilities::XSettings> (display);
+
+    X11Symbols::getInstance()->xSelectInput (display,
+                                             xSettings->getSettingsWindow(),
+                                             StructureNotifyMask | PropertyChangeMask);
 }
 
 XWindowSystem::DisplayVisuals::DisplayVisuals (::Display* xDisplay)
@@ -3054,6 +3090,7 @@ bool XWindowSystem::initialiseXDisplay()
 
     initialisePointerMap();
     updateModifierMappings();
+    initialiseXSettings();
 
    #if JUCE_USE_XSHM
     if (XSHMHelpers::isShmAvailable (display))
@@ -3588,7 +3625,7 @@ void XWindowSystem::propertyNotifyEvent (LinuxComponentPeer* peer, const XProper
             return false;
 
         XWindowSystemUtilities::ScopedXLock xLock;
-        XWindowSystemUtilities::GetXProperty prop (event.window, atoms.windowState, 0, 128, false, XA_ATOM);
+        XWindowSystemUtilities::GetXProperty prop (display, event.window, atoms.windowState, 0, 128, false, XA_ATOM);
 
         if (! (prop.success && prop.actualFormat == 32 && prop.actualType == XA_ATOM))
             return false;
@@ -3726,6 +3763,21 @@ void XWindowSystem::windowMessageReceive (XEvent& event)
         if (! juce_handleXEmbedEvent (nullptr, &event))
        #endif
         {
+            auto* instance = XWindowSystem::getInstance();
+
+            if (auto* xSettings = instance->getXSettings())
+            {
+                if (event.xany.window == xSettings->getSettingsWindow())
+                {
+                    if (event.xany.type == PropertyNotify)
+                        xSettings->update();
+                    else if (event.xany.type == DestroyNotify)
+                        instance->initialiseXSettings();
+
+                    return;
+                }
+            }
+
             if (auto* peer = dynamic_cast<LinuxComponentPeer*> (getPeerFor (event.xany.window)))
             {
                 XWindowSystem::getInstance()->handleWindowMessage (peer, event);
@@ -3734,8 +3786,6 @@ void XWindowSystem::windowMessageReceive (XEvent& event)
 
             if (event.type != ConfigureNotify)
                 return;
-
-            const auto* instance = XWindowSystem::getInstance();
 
             for (auto i = ComponentPeer::getNumPeers(); --i >= 0;)
                 instance->dismissBlockingModals (dynamic_cast<LinuxComponentPeer*> (ComponentPeer::getPeer (i)),
