@@ -373,6 +373,32 @@ static EnableNonClientDPIScalingFunc           enableNonClientDPIScaling        
 
 static bool hasCheckedForDPIAwareness = false;
 
+static void loadDPIAwarenessFunctions()
+{
+    setProcessDPIAware = (SetProcessDPIAwareFunc) getUser32Function ("SetProcessDPIAware");
+
+    constexpr auto shcore = "SHCore.dll";
+    LoadLibraryA (shcore);
+    const auto shcoreModule = GetModuleHandleA (shcore);
+
+    if (shcoreModule == nullptr)
+        return;
+
+    getDPIForMonitor                    = (GetDPIForMonitorFunc) GetProcAddress (shcoreModule, "GetDpiForMonitor");
+    setProcessDPIAwareness              = (SetProcessDPIAwarenessFunc) GetProcAddress (shcoreModule, "SetProcessDpiAwareness");
+
+   #if JUCE_WIN_PER_MONITOR_DPI_AWARE
+    getDPIForWindow                     = (GetDPIForWindowFunc) getUser32Function ("GetDpiForWindow");
+    getProcessDPIAwareness              = (GetProcessDPIAwarenessFunc) GetProcAddress (shcoreModule, "GetProcessDpiAwareness");
+    getWindowDPIAwarenessContext        = (GetWindowDPIAwarenessContextFunc) getUser32Function ("GetWindowDpiAwarenessContext");
+    setThreadDPIAwarenessContext        = (SetThreadDPIAwarenessContextFunc) getUser32Function ("SetThreadDpiAwarenessContext");
+    getThreadDPIAwarenessContext        = (GetThreadDPIAwarenessContextFunc) getUser32Function ("GetThreadDpiAwarenessContext");
+    getAwarenessFromDPIAwarenessContext = (GetAwarenessFromDpiAwarenessContextFunc) getUser32Function ("GetAwarenessFromDpiAwarenessContext");
+    setProcessDPIAwarenessContext       = (SetProcessDPIAwarenessContextFunc) getUser32Function ("SetProcessDpiAwarenessContext");
+    enableNonClientDPIScaling           = (EnableNonClientDPIScalingFunc) getUser32Function ("EnableNonClientDpiScaling");
+   #endif
+}
+
 static void setDPIAwareness()
 {
     if (hasCheckedForDPIAwareness)
@@ -383,45 +409,19 @@ static void setDPIAwareness()
     if (! JUCEApplicationBase::isStandaloneApp())
         return;
 
-    const auto shcore = "SHCore.dll";
-    LoadLibraryA (shcore);
-    const auto shcoreModule = GetModuleHandleA (shcore);
+    loadDPIAwarenessFunctions();
 
-    if (shcoreModule != nullptr)
-    {
-        getDPIForMonitor = (GetDPIForMonitorFunc) GetProcAddress (shcoreModule, "GetDpiForMonitor");
+    if (setProcessDPIAwarenessContext != nullptr
+        && setProcessDPIAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+        return;
 
-       #if JUCE_WIN_PER_MONITOR_DPI_AWARE
-        getDPIForWindow                     = (GetDPIForWindowFunc) getUser32Function ("GetDpiForWindow");
-        getProcessDPIAwareness              = (GetProcessDPIAwarenessFunc) GetProcAddress (shcoreModule, "GetProcessDpiAwareness");
-        getWindowDPIAwarenessContext        = (GetWindowDPIAwarenessContextFunc) getUser32Function ("GetWindowDpiAwarenessContext");
-        setThreadDPIAwarenessContext        = (SetThreadDPIAwarenessContextFunc) getUser32Function ("SetThreadDpiAwarenessContext");
-        getThreadDPIAwarenessContext        = (GetThreadDPIAwarenessContextFunc) getUser32Function ("GetThreadDpiAwarenessContext");
-        getAwarenessFromDPIAwarenessContext = (GetAwarenessFromDpiAwarenessContextFunc) getUser32Function ("GetAwarenessFromDpiAwarenessContext");
-        setProcessDPIAwareness              = (SetProcessDPIAwarenessFunc) GetProcAddress (shcoreModule, "SetProcessDpiAwareness");
-        setProcessDPIAwarenessContext       = (SetProcessDPIAwarenessContextFunc) getUser32Function ("SetProcessDpiAwarenessContext");
+    if (setProcessDPIAwareness != nullptr && enableNonClientDPIScaling != nullptr
+        && SUCCEEDED (setProcessDPIAwareness (DPI_Awareness::DPI_Awareness_Per_Monitor_Aware)))
+        return;
 
-        if (setProcessDPIAwarenessContext != nullptr
-            && setProcessDPIAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
-            return;
-
-        enableNonClientDPIScaling = (EnableNonClientDPIScalingFunc) getUser32Function ("EnableNonClientDpiScaling");
-
-        if (setProcessDPIAwareness != nullptr && enableNonClientDPIScaling != nullptr
-            && SUCCEEDED (setProcessDPIAwareness (DPI_Awareness::DPI_Awareness_Per_Monitor_Aware)))
-            return;
-       #endif
-
-        if (setProcessDPIAwareness == nullptr)
-            setProcessDPIAwareness = (SetProcessDPIAwarenessFunc) GetProcAddress (shcoreModule, "SetProcessDpiAwareness");
-
-        if (setProcessDPIAwareness != nullptr && getDPIForMonitor != nullptr
-             && SUCCEEDED (setProcessDPIAwareness (DPI_Awareness::DPI_Awareness_System_Aware)))
-            return;
-    }
-
-    // fallback for pre Windows 8.1 - equivalent to Process_System_DPI_Aware
-    setProcessDPIAware = (SetProcessDPIAwareFunc) getUser32Function ("SetProcessDPIAware");
+    if (setProcessDPIAwareness != nullptr && getDPIForMonitor != nullptr
+        && SUCCEEDED (setProcessDPIAwareness (DPI_Awareness::DPI_Awareness_System_Aware)))
+        return;
 
     if (setProcessDPIAware != nullptr)
         setProcessDPIAware();
@@ -435,6 +435,9 @@ static bool isPerMonitorDPIAwareProcess()
     static bool dpiAware = []() -> bool
     {
         setDPIAwareness();
+
+        if (! JUCEApplication::isStandaloneApp())
+            return false;
 
         if (getProcessDPIAwareness == nullptr)
             return false;
@@ -3444,12 +3447,6 @@ private:
     }
 
     //==============================================================================
-    struct ChildWindowCallbackData
-    {
-        std::map<HWND, RECT> windowRectsMap;
-        float scaleRatio;
-    };
-
     LRESULT handleDPIChanging (int newDPI, RECT newRect)
     {
         // Sometimes, windows that should not be automatically scaled (secondary windows in plugins)
@@ -3463,7 +3460,7 @@ private:
         if (approximatelyEqual (scaleFactor, newScale))
             return 0;
 
-        const auto oldScale = std::exchange (scaleFactor, newScale);
+        scaleFactor = newScale;
 
         {
             const ScopedValueSetter<int> setter (numInDpiChange, numInDpiChange + 1);
@@ -3479,56 +3476,9 @@ private:
         updateShadower();
         InvalidateRect (hwnd, nullptr, FALSE);
 
-        ChildWindowCallbackData callbackData;
-        callbackData.scaleRatio = (float) (scaleFactor / oldScale);
-
-        EnumChildWindows (hwnd, getChildWindowRectCallback, (LPARAM) &callbackData);
         scaleFactorListeners.call ([this] (ScaleFactorListener& l) { l.nativeScaleFactorChanged (scaleFactor); });
-        EnumChildWindows (hwnd, scaleChildWindowCallback, (LPARAM) &callbackData);
 
         return 0;
-    }
-
-    static BOOL CALLBACK getChildWindowRectCallback (HWND hwnd, LPARAM data)
-    {
-        auto& callbackData = *(reinterpret_cast<ChildWindowCallbackData*> (data));
-
-        callbackData.windowRectsMap[hwnd] = getWindowClientRect (hwnd);
-        return TRUE;
-    }
-
-    static BOOL CALLBACK scaleChildWindowCallback (HWND hwnd, LPARAM data)
-    {
-        auto& callbackData = *(reinterpret_cast<ChildWindowCallbackData*> (data));
-
-        auto originalBounds = rectangleFromRECT (callbackData.windowRectsMap[hwnd]);
-        auto scaledBounds = (originalBounds.toFloat() * callbackData.scaleRatio).toNearestInt();
-        auto currentBounds = rectangleFromRECT (getWindowClientRect (hwnd));
-
-        if (scaledBounds != currentBounds)
-        {
-            SetWindowPos (hwnd,
-                          nullptr,
-                          scaledBounds.getX(),
-                          scaledBounds.getY(),
-                          scaledBounds.getWidth(),
-                          scaledBounds.getHeight(),
-                          SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
-        }
-
-        if (auto* peer = getOwnerOfWindow (hwnd))
-            peer->handleChildDPIChanging();
-
-        return TRUE;
-    }
-
-    void handleChildDPIChanging()
-    {
-        scaleFactor = getScaleFactorForWindow (parentToAddTo);
-        scaleFactorListeners.call ([&] (ScaleFactorListener& l) { l.nativeScaleFactorChanged (scaleFactor); });
-
-        updateShadower();
-        InvalidateRect (hwnd, nullptr, FALSE);
     }
 
     //==============================================================================
