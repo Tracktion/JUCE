@@ -2870,7 +2870,7 @@ public:
     {
         if (cocoaWrapper != nullptr)
         {
-            if (isVisible())
+            if (isShowing())
                 openPluginWindow ((NSView*) cocoaWrapper->getView());
             else
                 closePluginWindow();
@@ -2888,6 +2888,8 @@ public:
                 setSize (w, h);
         }
     }
+
+    void parentHierarchyChanged() override { visibilityChanged(); }
    #else
     void paint (Graphics& g) override
     {
