@@ -33,7 +33,7 @@ namespace juce
 
     @tags{Audio}
 */
-class JUCE_API  AudioProcessorParameterWithID  : public AudioProcessorParameter
+class JUCE_API  AudioProcessorParameterWithID  : public AudioPluginInstance::HostedParameter
 {
 public:
     /** The creation of this object requires providing a name and ID which will be
@@ -59,6 +59,7 @@ public:
     /** Provides access to the parameter's category. */
     const Category category;
 
+    String getParameterID() const override;
     String getName (int) const override;
     String getLabel() const override;
     Category getCategory() const override;

@@ -33,6 +33,7 @@ AudioProcessorParameterWithID::AudioProcessorParameterWithID (const String& idTo
     : paramID (idToUse), name (nameToUse), label (labelToUse), category (categoryToUse) {}
 AudioProcessorParameterWithID::~AudioProcessorParameterWithID() {}
 
+String AudioProcessorParameterWithID::getParameterID() const                         { return paramID; }
 String AudioProcessorParameterWithID::getName (int maximumStringLength) const        { return name.substring (0, maximumStringLength); }
 String AudioProcessorParameterWithID::getLabel() const                               { return label; }
 AudioProcessorParameter::Category AudioProcessorParameterWithID::getCategory() const { return category; }
