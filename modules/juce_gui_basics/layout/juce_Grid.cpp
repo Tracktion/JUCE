@@ -1004,6 +1004,8 @@ float Grid::TrackInfo::getAbsoluteSize (float relativeFractionalUnit) const
 void Grid::performLayout (Rectangle<int> targetArea)
 {
     const auto itemsAndAreas = AutoPlacement().deduceAllItems (*this);
+    if (itemsAndAreas.isEmpty())
+        return;
 
     auto implicitTracks = AutoPlacement::createImplicitTracks (*this, itemsAndAreas);
 
