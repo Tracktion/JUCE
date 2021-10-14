@@ -26,15 +26,25 @@
 namespace juce
 {
 
-AudioProcessorParameterWithID::AudioProcessorParameterWithID (const String& idToUse,
-                                                              const String& nameToUse,
-                                                              const String& labelToUse,
-                                                              AudioProcessorParameter::Category categoryToUse)
-    : paramID (idToUse), name (nameToUse), label (labelToUse), category (categoryToUse) {}
-AudioProcessorParameterWithID::~AudioProcessorParameterWithID() {}
+//==============================================================================
+/**
+    A parameter with functions that are useful for plugin hosts.
 
-String AudioProcessorParameterWithID::getName (int maximumStringLength) const        { return name.substring (0, maximumStringLength); }
-String AudioProcessorParameterWithID::getLabel() const                               { return label; }
-AudioProcessorParameter::Category AudioProcessorParameterWithID::getCategory() const { return category; }
+    @tags{Audio}
+*/
+struct HostedAudioProcessorParameter : public AudioProcessorParameter
+{
+    /** Returns an ID that is unique to this parameter.
+
+        Parameter indices are unstable across plugin versions, which means that the
+        parameter found at a particular index in one version of a plugin might move
+        to a different index in the subsequent version.
+
+        Unlike the parameter index, the ID returned by this function should be
+        somewhat stable (depending on the format of the plugin), so it is more
+        suitable for storing/recalling automation data.
+    */
+    virtual String getParameterID() const = 0;
+};
 
 } // namespace juce
