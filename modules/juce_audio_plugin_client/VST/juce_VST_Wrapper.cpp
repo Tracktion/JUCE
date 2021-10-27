@@ -103,7 +103,6 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 using namespace juce;
 
-#include "../utility/juce_FakeMouseMoveGenerator.h"
 #include "../utility/juce_WindowsHooks.h"
 #include "../utility/juce_LinuxMessageThread.h"
 
@@ -985,7 +984,6 @@ public:
            #endif
 
             setOpaque (true);
-            ignoreUnused (fakeMouseGenerator);
         }
 
         ~EditorCompWrapper() override
@@ -1292,7 +1290,6 @@ public:
 
         //==============================================================================
         JuceVSTWrapper& wrapper;
-        FakeMouseMoveGenerator fakeMouseGenerator;
         bool resizingChild = false, resizingParent = false;
 
         float editorScaleFactor = 1.0f;

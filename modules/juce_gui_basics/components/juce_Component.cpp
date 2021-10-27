@@ -301,11 +301,11 @@ struct Component::ComponentHelpers
     }
 
     //==============================================================================
-    static bool hitTest (Component& comp, Point<int> localPoint)
+    static bool hitTest (Component& comp, Point<float> localPoint)
     {
-        return isPositiveAndBelow (localPoint.x, comp.getWidth())
-            && isPositiveAndBelow (localPoint.y, comp.getHeight())
-            && comp.hitTest (localPoint.x, localPoint.y);
+        const auto intPoint = localPoint.roundToInt();
+        return Rectangle<int> { comp.getWidth(), comp.getHeight() }.toFloat().contains (localPoint)
+               && comp.hitTest (intPoint.x, intPoint.y);
     }
 
     // converts an unscaled position within a peer to the local position within that peer's component
@@ -469,6 +469,24 @@ struct Component::ComponentHelpers
 
         for (auto* child : c.childComponentList)
             releaseAllCachedImageResources (*child);
+    }
+
+    //==============================================================================
+    static bool modalWouldBlockComponent (const Component& maybeBlocked, Component* modal)
+    {
+        return modal != nullptr
+            && modal != &maybeBlocked
+            && ! modal->isParentOf (&maybeBlocked)
+            && ! modal->canModalEventBeSentToComponent (&maybeBlocked);
+    }
+
+    template <typename Function>
+    static void sendMouseEventToComponentsThatAreBlockedByModal (Component& modal, Function&& function)
+    {
+        for (auto& ms : Desktop::getInstance().getMouseSources())
+            if (auto* c = ms.getComponentUnderMouse())
+                if (modalWouldBlockComponent (*c, &modal))
+                    (c->*function) (ms, ms.getScreenPosition(), Time::getCurrentTime());
     }
 };
 
@@ -1358,7 +1376,7 @@ bool Component::hitTest (int x, int y)
             auto& child = *childComponentList.getUnchecked (i);
 
             if (child.isVisible()
-                 && ComponentHelpers::hitTest (child, ComponentHelpers::convertFromParentSpace (child, Point<int> (x, y))))
+                 && ComponentHelpers::hitTest (child, ComponentHelpers::convertFromParentSpace (child, Point<int> (x, y).toFloat())))
                 return true;
         }
     }
@@ -1382,15 +1400,15 @@ void Component::getInterceptsMouseClicks (bool& allowsClicksOnThisComponent,
 
 bool Component::contains (Point<int> point)
 {
-    return containsInternal (point.toFloat());
+    return contains (point.toFloat());
 }
 
-bool Component::containsInternal (Point<float> point)
+bool Component::contains (Point<float> point)
 {
-    if (ComponentHelpers::hitTest (*this, point.roundToInt()))
+    if (ComponentHelpers::hitTest (*this, point))
     {
         if (parentComponent != nullptr)
-            return parentComponent->containsInternal (ComponentHelpers::convertToParentSpace (*this, point));
+            return parentComponent->contains (ComponentHelpers::convertToParentSpace (*this, point));
 
         if (flags.hasHeavyweightPeerFlag)
             if (auto* peer = getPeer())
@@ -1402,34 +1420,34 @@ bool Component::containsInternal (Point<float> point)
 
 bool Component::reallyContains (Point<int> point, bool returnTrueIfWithinAChild)
 {
-    return reallyContainsInternal (point.toFloat(), returnTrueIfWithinAChild);
+    return reallyContains (point.toFloat(), returnTrueIfWithinAChild);
 }
 
-bool Component::reallyContainsInternal (Point<float> point, bool returnTrueIfWithinAChild)
+bool Component::reallyContains (Point<float> point, bool returnTrueIfWithinAChild)
 {
-    if (! containsInternal (point))
+    if (! contains (point))
         return false;
 
     auto* top = getTopLevelComponent();
-    auto* compAtPosition = top->getComponentAtInternal (top->getLocalPoint (this, point));
+    auto* compAtPosition = top->getComponentAt (top->getLocalPoint (this, point));
 
     return (compAtPosition == this) || (returnTrueIfWithinAChild && isParentOf (compAtPosition));
 }
 
 Component* Component::getComponentAt (Point<int> position)
 {
-    return getComponentAtInternal (position.toFloat());
+    return getComponentAt (position.toFloat());
 }
 
-Component* Component::getComponentAtInternal (Point<float> position)
+Component* Component::getComponentAt (Point<float> position)
 {
-    if (flags.visibleFlag && ComponentHelpers::hitTest (*this, position.roundToInt()))
+    if (flags.visibleFlag && ComponentHelpers::hitTest (*this, position))
     {
         for (int i = childComponentList.size(); --i >= 0;)
         {
             auto* child = childComponentList.getUnchecked (i);
 
-            child = child->getComponentAtInternal (ComponentHelpers::convertFromParentSpace (*child, position));
+            child = child->getComponentAt (ComponentHelpers::convertFromParentSpace (*child, position));
 
             if (child != nullptr)
                 return child;
@@ -1443,7 +1461,7 @@ Component* Component::getComponentAtInternal (Point<float> position)
 
 Component* Component::getComponentAt (int x, int y)
 {
-    return getComponentAt ({ x, y });
+    return getComponentAt (Point<int> { x, y });
 }
 
 //==============================================================================
@@ -1720,6 +1738,11 @@ void Component::enterModalState (bool shouldTakeKeyboardFocus,
 
     if (! isCurrentlyModal (false))
     {
+        // While this component is in modal state it may block other components from receiving
+        // mouseExit events. To keep mouseEnter and mouseExit calls balanced on these components,
+        // we must manually force the mouse to "leave" blocked components.
+        ComponentHelpers::sendMouseEventToComponentsThatAreBlockedByModal (*this, &Component::internalMouseExit);
+
         auto& mcm = *ModalComponentManager::getInstance();
         mcm.startModal (this, deleteWhenDismissed);
         mcm.attachCallback (this, callback);
@@ -1746,10 +1769,10 @@ void Component::exitModalState (int returnValue)
             mcm.endModal (this, returnValue);
             mcm.bringModalComponentsToFront();
 
-            // If any of the mouse sources are over another Component when we exit the modal state then send a mouse enter event
-            for (auto& ms : Desktop::getInstance().getMouseSources())
-                if (auto* c = ms.getComponentUnderMouse())
-                    c->internalMouseEnter (ms, ms.getScreenPosition(), Time::getCurrentTime());
+            // While this component is in modal state it may block other components from receiving
+            // mouseEnter events. To keep mouseEnter and mouseExit calls balanced on these components,
+            // we must manually force the mouse to "enter" blocked components.
+            ComponentHelpers::sendMouseEventToComponentsThatAreBlockedByModal (*this, &Component::internalMouseEnter);
         }
         else
         {
@@ -1772,10 +1795,7 @@ bool Component::isCurrentlyModal (bool onlyConsiderForemostModalComponent) const
 
 bool Component::isCurrentlyBlockedByAnotherModalComponent() const
 {
-    auto* mc = getCurrentlyModalComponent();
-
-    return ! (mc == nullptr || mc == this || mc->isParentOf (this)
-               || mc->canModalEventBeSentToComponent (this));
+    return ComponentHelpers::modalWouldBlockComponent (*this, getCurrentlyModalComponent());
 }
 
 int JUCE_CALLTYPE Component::getNumCurrentlyModalComponents() noexcept
@@ -3054,7 +3074,7 @@ bool Component::isMouseOver (bool includeChildren) const
 
         if (c != nullptr && (c == this || (includeChildren && isParentOf (c))))
             if (ms.isDragging() || ! (ms.isTouch() || ms.isPen()))
-                if (c->reallyContainsInternal (c->getLocalPoint (nullptr, ms.getScreenPosition()), false))
+                if (c->reallyContains (c->getLocalPoint (nullptr, ms.getScreenPosition()), false))
                     return true;
     }
 

@@ -48,7 +48,6 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
 #include "../utility/juce_IncludeSystemHeaders.h"
 #include "../utility/juce_IncludeModuleHeaders.h"
 #include "../utility/juce_WindowsHooks.h"
-#include "../utility/juce_FakeMouseMoveGenerator.h"
 #include "../utility/juce_LinuxMessageThread.h"
 #include <juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp>
 #include <juce_audio_processors/format_types/juce_VST3Common.h>
@@ -844,20 +843,17 @@ public:
 
         bool setNormalized (Vst::ParamValue v) override
         {
-            auto programValue = roundToInt (toPlain (v));
+            const auto programValue = getProgramValueFromNormalised (v);
 
-            if (isPositiveAndBelow (programValue, owner.getNumPrograms()))
+            if (programValue != owner.getCurrentProgram())
+                owner.setCurrentProgram (programValue);
+
+            if (valueNormalized != v)
             {
-                if (programValue != owner.getCurrentProgram())
-                    owner.setCurrentProgram (programValue);
+                valueNormalized = v;
+                changed();
 
-                if (valueNormalized != v)
-                {
-                    valueNormalized = v;
-                    changed();
-
-                    return true;
-                }
+                return true;
             }
 
             return false;
@@ -890,8 +886,13 @@ public:
             return String (CharPointer_UTF16 (reinterpret_cast<const CharPointer_UTF16::CharType*> (text)));
         }
 
-        Vst::ParamValue toPlain (Vst::ParamValue v) const override       { return v * (info.stepCount + 1); }
-        Vst::ParamValue toNormalized (Vst::ParamValue v) const override  { return v / (info.stepCount + 1); }
+        Steinberg::int32 getProgramValueFromNormalised (Vst::ParamValue v) const
+        {
+            return jmin (info.stepCount, (Steinberg::int32) (v * (info.stepCount + 1)));
+        }
+
+        Vst::ParamValue toPlain (Vst::ParamValue v) const override       { return getProgramValueFromNormalised (v); }
+        Vst::ParamValue toNormalized (Vst::ParamValue v) const override  { return v / info.stepCount; }
 
     private:
         AudioProcessor& owner;
@@ -1947,8 +1948,6 @@ private:
             {
                 setOpaque (true);
                 setBroughtToFrontOnMouseClick (true);
-
-                ignoreUnused (fakeMouseGenerator);
             }
 
             ~ContentWrapperComponent() override
@@ -2118,7 +2117,6 @@ private:
         private:
             JuceVST3Editor& owner;
             std::unique_ptr<EditorHostContext> editorHostContext;
-            FakeMouseMoveGenerator fakeMouseGenerator;
             Rectangle<int> lastBounds;
             bool resizingChild = false, resizingParent = false;
 
