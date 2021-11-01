@@ -896,7 +896,7 @@ public:
                     NSRect rect = rects[i];
                     CGContextSaveGState (cg);
                     CGContextClipToRect (cg, CGRectMake (rect.origin.x, rect.origin.y, rect.size.width, rect.size.height));
-                    drawRect (cg, rect, displayScale);
+                    drawRectWithContext (cg, rect, displayScale);
                     CGContextRestoreGState (cg);
                 }
 
@@ -1360,7 +1360,9 @@ public:
                 return NSPasteboardTypeFileURL;
            #endif
 
+            JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
             return (NSString*) kUTTypeFileURL;
+            JUCE_END_IGNORE_WARNINGS_GCC_LIKE
         }();
 
         return [NSArray arrayWithObjects: type, (NSString*) kPasteboardTypeFileURLPromise, NSPasteboardTypeString, nil];
