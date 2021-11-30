@@ -39,6 +39,12 @@ constexpr auto juceAudioObjectPropertyElementMain =
        #endif
 
 //==============================================================================
+struct AsyncRestarter
+{
+    virtual ~AsyncRestarter() = default;
+    virtual void restartAsync() = 0;
+};
+
 struct SystemVol
 {
     SystemVol (AudioObjectPropertySelector selector) noexcept
@@ -162,14 +168,15 @@ class CoreAudioIODeviceType;
 class CoreAudioIODevice;
 
 //==============================================================================
-class CoreAudioInternal  : private Timer
+class CoreAudioInternal  : private Timer,
+                           private AsyncUpdater
 {
 public:
     CoreAudioInternal (CoreAudioIODevice& d, AudioDeviceID id, bool input, bool output)
-       : owner (d),
-         deviceID (id),
-         isInputDevice  (input),
-         isOutputDevice (output)
+        : owner (d),
+          deviceID (id),
+          isInputDevice  (input),
+          isOutputDevice (output)
     {
         jassert (deviceID != 0);
 
@@ -189,6 +196,9 @@ public:
 
     ~CoreAudioInternal() override
     {
+        stopTimer();
+        cancelPendingUpdate();
+
         AudioObjectPropertyAddress pa;
         pa.mSelector = kAudioObjectPropertySelectorWildcard;
         pa.mScope = kAudioObjectPropertyScopeWildcard;
@@ -680,7 +690,7 @@ public:
         return error;
     }
 
-    bool start()
+    bool start (AudioIODeviceCallback* callbackToNotify)
     {
         const ScopedLock sl (callbackLock);
 
@@ -703,22 +713,26 @@ public:
                     }
                 }
             }
+
+            if (started)
+            {
+                callback = callbackToNotify;
+
+                if (callback != nullptr)
+                    callback->audioDeviceAboutToStart (&owner);
+            }
         }
+
+        playing = started && callback != nullptr;
 
         return started;
     }
 
-    void setCallback (AudioIODeviceCallback* cb)
-    {
-        const ScopedLock sl (callbackLock);
-        callback = cb;
-    }
-
-    void stop (bool leaveInterruptRunning)
+    AudioIODeviceCallback* stop (bool leaveInterruptRunning)
     {
         const ScopedLock sl (callbackLock);
 
-        callback = nullptr;
+        auto result = std::exchange (callback, nullptr);
 
         if (started && (deviceID != 0) && ! leaveInterruptRunning)
         {
@@ -737,7 +751,10 @@ public:
             OK (AudioDeviceDestroyIOProcID (deviceID, audioProcID));
             audioProcID = {};
             started = false;
+            playing = false;
         }
+
+        return result;
     }
 
     double getSampleRate() const  { return sampleRate; }
@@ -815,13 +832,52 @@ public:
         }
     }
 
-    // called by callbacks
+    // called by callbacks (possibly off the main thread)
     void deviceDetailsChanged()
     {
         if (callbacksAllowed.get() == 1)
             startTimer (100);
     }
 
+    // called by callbacks (possibly off the main thread)
+    void deviceRequestedRestart()
+    {
+        owner.restart();
+        triggerAsyncUpdate();
+    }
+
+    bool isPlaying() const { return playing.load(); }
+
+    //==============================================================================
+    CoreAudioIODevice& owner;
+    std::atomic<int> inputLatency { 0 };
+    std::atomic<int>  outputLatency { 0 };
+    int bitDepth = 32;
+    int xruns = 0;
+    BigInteger activeInputChans, activeOutputChans;
+    StringArray inChanNames, outChanNames;
+    Array<double> sampleRates;
+    Array<int> bufferSizes;
+    AudioDeviceIOProcID audioProcID = {};
+
+private:
+    AudioIODeviceCallback* callback = nullptr;
+    CriticalSection callbackLock;
+    AudioDeviceID deviceID;
+    bool started = false, audioDeviceStopPending = false;
+    std::atomic<bool> playing { false };
+    double sampleRate = 0;
+    int bufferSize = 512;
+    HeapBlock<float> audioBuffer;
+    int numInputChans  = 0;
+    int numOutputChans = 0;
+    Atomic<int> callbacksAllowed { 1 };
+    const bool isInputDevice, isOutputDevice;
+
+    Array<CallbackDetailsForChannel> inputChannelInfo, outputChannelInfo;
+    HeapBlock<float*> tempInputBuffers, tempOutputBuffers;
+
+    //==============================================================================
     void timerCallback() override
     {
         JUCE_COREAUDIOLOG ("Device changed");
@@ -836,35 +892,12 @@ public:
             owner.restart();
     }
 
-    //==============================================================================
-    CoreAudioIODevice& owner;
-    std::atomic<int> inputLatency { 0 };
-    std::atomic<int>  outputLatency { 0 };
-    int bitDepth = 32;
-    int xruns = 0;
-    BigInteger activeInputChans, activeOutputChans;
-    StringArray inChanNames, outChanNames;
-    Array<double> sampleRates;
-    Array<int> bufferSizes;
-    AudioIODeviceCallback* callback = nullptr;
-    AudioDeviceIOProcID audioProcID = {};
+    void handleAsyncUpdate() override
+    {
+        if (owner.deviceType != nullptr)
+            owner.deviceType->audioDeviceListChanged();
+    }
 
-private:
-    CriticalSection callbackLock;
-    AudioDeviceID deviceID;
-    bool started = false, audioDeviceStopPending = false;
-    double sampleRate = 0;
-    int bufferSize = 512;
-    HeapBlock<float> audioBuffer;
-    int numInputChans  = 0;
-    int numOutputChans = 0;
-    Atomic<int> callbacksAllowed { 1 };
-    const bool isInputDevice, isOutputDevice;
-
-    Array<CallbackDetailsForChannel> inputChannelInfo, outputChannelInfo;
-    HeapBlock<float*> tempInputBuffers, tempOutputBuffers;
-
-    //==============================================================================
     static OSStatus audioIOProc (AudioDeviceID /*inDevice*/,
                                  const AudioTimeStamp* inNow,
                                  const AudioBufferList* inInputData,
@@ -911,10 +944,7 @@ private:
 
             case kAudioDevicePropertyDeviceHasChanged:
             case kAudioObjectPropertyOwnedObjects:
-                intern->owner.restart();
-
-                if (intern->owner.deviceType != nullptr)
-                    intern->owner.deviceType->triggerAsyncAudioDeviceListChange();
+                intern->deviceRequestedRestart();
                 break;
 
             case kAudioDevicePropertyBufferSizeRange:
@@ -982,20 +1012,18 @@ public:
           inputIndex (inputIndex_),
           outputIndex (outputIndex_)
     {
-        CoreAudioInternal* device = nullptr;
-
-        if (outputDeviceId == 0 || outputDeviceId == inputDeviceId)
+        internal = [this, &inputDeviceId, &outputDeviceId]
         {
-            jassert (inputDeviceId != 0);
-            device = new CoreAudioInternal (*this, inputDeviceId, true, outputDeviceId != 0);
-        }
-        else
-        {
-            device = new CoreAudioInternal (*this, outputDeviceId, false, true);
-        }
+            if (outputDeviceId == 0 || outputDeviceId == inputDeviceId)
+            {
+                jassert (inputDeviceId != 0);
+                return std::make_unique<CoreAudioInternal> (*this, inputDeviceId, true, outputDeviceId != 0);
+            }
 
-        jassert (device != nullptr);
-        internal.reset (device);
+            return std::make_unique<CoreAudioInternal> (*this, outputDeviceId, false, true);
+        }();
+
+        jassert (internal != nullptr);
 
         AudioObjectPropertyAddress pa;
         pa.mSelector = kAudioObjectPropertySelectorWildcard;
@@ -1091,49 +1119,35 @@ public:
 
     void start (AudioIODeviceCallback* callback) override
     {
-        if (! isStarted)
-        {
-            if (callback != nullptr)
-                callback->audioDeviceAboutToStart (this);
-
-            isStarted = internal->start();
-
-            if (isStarted)
-            {
-                internal->setCallback (callback);
-                previousCallback = callback;
-            }
-        }
+        if (internal->start (callback))
+            previousCallback = callback;
     }
 
     void stop() override
     {
         restartDevice = false;
-
-        if (isStarted)
-        {
-            auto lastCallback = internal->callback;
-
-            isStarted = false;
-            internal->stop (true);
-
-            if (lastCallback != nullptr)
-                lastCallback->audioDeviceStopped();
-        }
+        stopAndGetLastCallback();
     }
 
-    void stopInternal()
+    AudioIODeviceCallback* stopAndGetLastCallback() const
     {
-        stop();
+        auto* lastCallback = internal->stop (true);
+
+        if (lastCallback != nullptr)
+            lastCallback->audioDeviceStopped();
+
+        return lastCallback;
+    }
+
+    AudioIODeviceCallback* stopInternal()
+    {
         restartDevice = true;
+        return stopAndGetLastCallback();
     }
 
     bool isPlaying() override
     {
-        if (internal->callback == nullptr)
-            isStarted = false;
-
-        return isStarted;
+        return internal->isPlaying();
     }
 
     String getLastError() override
@@ -1147,28 +1161,21 @@ public:
             deviceType->audioDeviceListChanged();
     }
 
+    // called by callbacks (possibly off the main thread)
     void restart()
     {
-        if (deviceWrapperRestartCallback != nullptr)
+        if (restarter != nullptr)
         {
-            deviceWrapperRestartCallback();
+            restarter->restartAsync();
+            return;
         }
-        else
+
         {
-            {
-                const ScopedLock sl (closeLock);
-
-                if (isStarted)
-                {
-                    if (internal->callback != nullptr)
-                        previousCallback = internal->callback;
-
-                    stopInternal();
-                }
-            }
-
-            startTimer (100);
+            const ScopedLock sl (closeLock);
+            previousCallback = stopInternal();
         }
+
+        startTimer (100);
     }
 
     bool setCurrentSampleRate (double newSampleRate)
@@ -1176,9 +1183,9 @@ public:
         return internal->setNominalSampleRate (newSampleRate);
     }
 
-    void setDeviceWrapperRestartCallback (const std::function<void()>& cb)
+    void setAsyncRestarter (AsyncRestarter* restarterIn)
     {
-        deviceWrapperRestartCallback = cb;
+        restarter = restarterIn;
     }
 
     bool shouldRestartDevice() const noexcept    { return restartDevice; }
@@ -1188,10 +1195,10 @@ public:
 
 private:
     std::unique_ptr<CoreAudioInternal> internal;
-    bool isOpen_ = false, isStarted = false, restartDevice = true;
+    bool isOpen_ = false, restartDevice = true;
     String lastError;
     AudioIODeviceCallback* previousCallback = nullptr;
-    std::function<void()> deviceWrapperRestartCallback = nullptr;
+    AsyncRestarter* restarter = nullptr;
     BigInteger inputChannelsRequested, outputChannelsRequested;
     CriticalSection closeLock;
 
@@ -1230,6 +1237,7 @@ private:
 
 //==============================================================================
 class AudioIODeviceCombiner    : public AudioIODevice,
+                                 private AsyncRestarter,
                                  private Thread,
                                  private Timer
 {
@@ -1247,18 +1255,20 @@ public:
         devices.clear();
     }
 
-    void addDevice (CoreAudioIODevice* device, bool useInputs, bool useOutputs)
+    void addDevice (std::unique_ptr<CoreAudioIODevice> device, bool useInputs, bool useOutputs)
     {
         jassert (device != nullptr);
         jassert (! isOpen());
         jassert (! device->isOpen());
-        devices.add (new DeviceWrapper (*this, device, useInputs, useOutputs));
+        auto* devicePtr = device.get();
+
+        devices.add (std::make_unique<DeviceWrapper> (*this, std::move (device), useInputs, useOutputs));
 
         if (currentSampleRate == 0)
-            currentSampleRate = device->getCurrentSampleRate();
+            currentSampleRate = devicePtr->getCurrentSampleRate();
 
         if (currentBufferSize == 0)
-            currentBufferSize = device->getCurrentBufferSizeSamples();
+            currentBufferSize = devicePtr->getCurrentBufferSizeSamples();
     }
 
     Array<AudioIODevice*> getDevices() const
@@ -1486,7 +1496,7 @@ public:
         start (cb);
     }
 
-    void restartAsync()
+    void restartAsync() override
     {
         {
             const ScopedLock sl (closeLock);
@@ -1563,7 +1573,13 @@ public:
 
     void start (AudioIODeviceCallback* newCallback) override
     {
-        if (callback != newCallback)
+        const auto shouldStart = [&]
+        {
+            const ScopedLock sl (callbackLock);
+            return callback != newCallback;
+        }();
+
+        if (shouldStart)
         {
             stop();
             fifos.clear();
@@ -1575,8 +1591,7 @@ public:
                 newCallback->audioDeviceAboutToStart (this);
 
             const ScopedLock sl (callbackLock);
-            callback = newCallback;
-            previousCallback = callback;
+            previousCallback = std::exchange (callback, newCallback);
         }
     }
 
@@ -1833,11 +1848,11 @@ private:
     //==============================================================================
     struct DeviceWrapper  : private AudioIODeviceCallback
     {
-        DeviceWrapper (AudioIODeviceCombiner& cd, CoreAudioIODevice* d, bool useIns, bool useOuts)
-            : owner (cd), device (d),
+        DeviceWrapper (AudioIODeviceCombiner& cd, std::unique_ptr<CoreAudioIODevice> d, bool useIns, bool useOuts)
+            : owner (cd), device (std::move (d)),
               useInputs (useIns), useOutputs (useOuts)
         {
-            d->setDeviceWrapperRestartCallback ([this] { owner.restartAsync(); });
+            device->setAsyncRestarter (&owner);
         }
 
         ~DeviceWrapper() override
@@ -2059,6 +2074,8 @@ public:
 
     ~CoreAudioIODeviceType() override
     {
+        cancelPendingUpdate();
+
         AudioObjectPropertyAddress pa;
         pa.mSelector = kAudioHardwarePropertyDevices;
         pa.mScope = kAudioObjectPropertyScopeWildcard;
@@ -2210,22 +2227,20 @@ public:
                                                        : outputDeviceName;
 
         if (inputDeviceID == outputDeviceID)
-            return new CoreAudioIODevice (this, combinedName, inputDeviceID, inputIndex, outputDeviceID, outputIndex);
+            return std::make_unique<CoreAudioIODevice> (this, combinedName, inputDeviceID, inputIndex, outputDeviceID, outputIndex).release();
 
-        std::unique_ptr<CoreAudioIODevice> in, out;
+        auto in = inputDeviceID != 0 ? std::make_unique<CoreAudioIODevice> (this, inputDeviceName, inputDeviceID, inputIndex, 0, -1)
+                                     : nullptr;
 
-        if (inputDeviceID != 0)
-            in.reset (new CoreAudioIODevice (this, inputDeviceName, inputDeviceID, inputIndex, 0, -1));
+        auto out = outputDeviceID != 0 ? std::make_unique<CoreAudioIODevice> (this, outputDeviceName, 0, -1, outputDeviceID, outputIndex)
+                                       : nullptr;
 
-        if (outputDeviceID != 0)
-            out.reset (new CoreAudioIODevice (this, outputDeviceName, 0, -1, outputDeviceID, outputIndex));
-
-        if (in == nullptr)   return out.release();
+        if (in  == nullptr)  return out.release();
         if (out == nullptr)  return in.release();
 
-        std::unique_ptr<AudioIODeviceCombiner> combo (new AudioIODeviceCombiner (combinedName, this));
-        combo->addDevice (in.release(),  true, false);
-        combo->addDevice (out.release(), false, true);
+        auto combo = std::make_unique<AudioIODeviceCombiner> (combinedName, this);
+        combo->addDevice (std::move (in),  true, false);
+        combo->addDevice (std::move (out), false, true);
         return combo.release();
     }
 
@@ -2235,17 +2250,17 @@ public:
         callDeviceChangeListeners();
     }
 
-    void triggerAsyncAudioDeviceListChange()
-    {
-        triggerAsyncUpdate();
-    }
-
     //==============================================================================
 private:
     StringArray inputDeviceNames, outputDeviceNames;
     Array<AudioDeviceID> inputIds, outputIds;
 
     bool hasScanned = false;
+
+    void handleAsyncUpdate() override
+    {
+        audioDeviceListChanged();
+    }
 
     static int getNumChannels (AudioDeviceID deviceID, bool input)
     {
@@ -2276,13 +2291,8 @@ private:
 
     static OSStatus hardwareListenerProc (AudioDeviceID, UInt32, const AudioObjectPropertyAddress*, void* clientData)
     {
-        static_cast<CoreAudioIODeviceType*> (clientData)->triggerAsyncAudioDeviceListChange();
+        static_cast<CoreAudioIODeviceType*> (clientData)->triggerAsyncUpdate();
         return noErr;
-    }
-
-    void handleAsyncUpdate() override
-    {
-        audioDeviceListChanged();
     }
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (CoreAudioIODeviceType)

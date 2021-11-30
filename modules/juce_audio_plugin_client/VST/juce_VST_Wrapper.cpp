@@ -844,7 +844,7 @@ public:
             if (auto* ed = processor->createEditorIfNeeded())
             {
                 setHasEditorFlag (true);
-                editorComp.reset (new EditorCompWrapper (*this, *ed));
+                editorComp.reset (new EditorCompWrapper (*this, *ed, editorScaleFactor));
             }
             else
             {
@@ -969,10 +969,15 @@ public:
                               , public Timer
                              #endif
     {
-        EditorCompWrapper (JuceVSTWrapper& w, AudioProcessorEditor& editor)
+        EditorCompWrapper (JuceVSTWrapper& w, AudioProcessorEditor& editor, float initialScale)
             : wrapper (w)
         {
             editor.setOpaque (true);
+           #if ! JUCE_MAC
+            editor.setScaleFactor (initialScale);
+           #else
+            ignoreUnused (initialScale);
+           #endif
             addAndMakeVisible (editor);
 
             auto editorBounds = getSizeToContainChild();
@@ -1212,24 +1217,19 @@ public:
 
         void setContentScaleFactor (float scale)
         {
-            if (! approximatelyEqual (scale, editorScaleFactor))
+            if (auto* pluginEditor = getEditorComp())
             {
-                editorScaleFactor = scale;
+                auto prevEditorBounds = pluginEditor->getLocalArea (this, lastBounds);
 
-                if (auto* pluginEditor = getEditorComp())
                 {
-                    auto prevEditorBounds = pluginEditor->getLocalArea (this, lastBounds);
+                    const ScopedValueSetter<bool> resizingChildSetter (resizingChild, true);
 
-                    {
-                        const ScopedValueSetter<bool> resizingChildSetter (resizingChild, true);
-
-                        pluginEditor->setScaleFactor (editorScaleFactor);
-                        pluginEditor->setBounds (prevEditorBounds.withPosition (0, 0));
-                    }
-
-                    lastBounds = getSizeToContainChild();
-                    updateWindowSize();
+                    pluginEditor->setScaleFactor (scale);
+                    pluginEditor->setBounds (prevEditorBounds.withPosition (0, 0));
                 }
+
+                lastBounds = getSizeToContainChild();
+                updateWindowSize();
             }
         }
 
@@ -1253,7 +1253,7 @@ public:
          {
              auto hostWindowScale = (float) getScaleFactorForWindow ((HostWindowType) hostWindow);
 
-             if (hostWindowScale > 0.0f && ! approximatelyEqual (hostWindowScale, editorScaleFactor))
+             if (hostWindowScale > 0.0f && ! approximatelyEqual (hostWindowScale, wrapper.editorScaleFactor))
                  wrapper.handleSetContentScaleFactor (hostWindowScale);
          }
 
@@ -1292,7 +1292,6 @@ public:
         JuceVSTWrapper& wrapper;
         bool resizingChild = false, resizingParent = false;
 
-        float editorScaleFactor = 1.0f;
         juce::Rectangle<int> lastBounds;
 
        #if JUCE_LINUX || JUCE_BSD
@@ -2007,9 +2006,18 @@ private:
 
     pointer_sized_int handleSetContentScaleFactor (float scale)
     {
+        checkWhetherMessageThreadIsCorrect();
+        const MessageManagerLock mmLock;
+
        #if ! JUCE_MAC
-        if (editorComp != nullptr)
-            editorComp->setContentScaleFactor (scale);
+        if (! approximatelyEqual (scale, editorScaleFactor))
+        {
+            editorScaleFactor = scale;
+
+            if (editorComp != nullptr)
+                editorComp->setContentScaleFactor (editorScaleFactor);
+        }
+
        #else
         ignoreUnused (scale);
        #endif
@@ -2079,6 +2087,7 @@ private:
     CriticalSection stateInformationLock;
     juce::MemoryBlock chunkMemory;
     uint32 chunkMemoryTime = 0;
+    float editorScaleFactor = 1.0f;
     std::unique_ptr<EditorCompWrapper> editorComp;
     Vst2::ERect editorRect;
     MidiBuffer midiEvents;
