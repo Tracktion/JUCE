@@ -267,7 +267,7 @@ void ProjectExporter::createPropertyEditors (PropertyListBuilder& props)
 
         if ((shouldBuildTargetType (build_tools::ProjectType::Target::VSTPlugIn) && project.shouldBuildVST()) || (project.isVSTPluginHost() && supportsTargetType (build_tools::ProjectType::Target::VSTPlugIn)))
         {
-            props.add (new FilePathPropertyComponent (vstLegacyPathValueWrapper.getWrappedValueWithDefault(), "VST (Legacy) SDK Folder", true,
+            props.add (new FilePathPropertyComponent (vstLegacyPathValueWrapper.getWrappedValueTreePropertyWithDefault(), "VST (Legacy) SDK Folder", true,
                                                       getTargetOSForExporter() == TargetOS::getThisOS(), "*", project.getProjectFolder()),
                        "If you're building a VST plug-in or host, you can use this field to override the global VST (Legacy) SDK path with a project-specific path. "
                        "This can be an absolute path, or a path relative to the Projucer project file.");
@@ -275,14 +275,14 @@ void ProjectExporter::createPropertyEditors (PropertyListBuilder& props)
 
         if (shouldBuildTargetType (build_tools::ProjectType::Target::AAXPlugIn) && project.shouldBuildAAX())
         {
-            props.add (new FilePathPropertyComponent (aaxPathValueWrapper.getWrappedValueWithDefault(), "AAX SDK Folder", true,
+            props.add (new FilePathPropertyComponent (aaxPathValueWrapper.getWrappedValueTreePropertyWithDefault(), "AAX SDK Folder", true,
                                                       getTargetOSForExporter() == TargetOS::getThisOS(), "*", project.getProjectFolder()),
                        "If you're building an AAX plug-in, this must be the folder containing the AAX SDK. This can be an absolute path, or a path relative to the Projucer project file.");
         }
 
         if (shouldBuildTargetType (build_tools::ProjectType::Target::RTASPlugIn) && project.shouldBuildRTAS())
         {
-            props.add (new FilePathPropertyComponent (rtasPathValueWrapper.getWrappedValueWithDefault(), "RTAS SDK Folder", true,
+            props.add (new FilePathPropertyComponent (rtasPathValueWrapper.getWrappedValueTreePropertyWithDefault(), "RTAS SDK Folder", true,
                                                       getTargetOSForExporter() == TargetOS::getThisOS(), "*", project.getProjectFolder()),
                        "If you're building an RTAS plug-in, this must be the folder containing the RTAS SDK. This can be an absolute path, or a path relative to the Projucer project file.");
         }
@@ -295,7 +295,7 @@ void ProjectExporter::createPropertyEditors (PropertyListBuilder& props)
                    "Extra command-line flags to be passed to the compiler. This string can contain references to preprocessor definitions in the "
                    "form ${NAME_OF_DEFINITION}, which will be replaced with their values.");
 
-        for (HashMap<String, ValueWithDefault>::Iterator i (compilerFlagSchemesMap); i.next();)
+        for (HashMap<String, ValueTreePropertyWithDefault>::Iterator i (compilerFlagSchemesMap); i.next();)
             props.add (new TextPropertyComponent (compilerFlagSchemesMap.getReference (i.getKey()), "Compiler Flags for " + i.getKey().quoted(), 8192, false),
                        "The exporter-specific compiler flags that will be added to files using this scheme.");
 
@@ -560,7 +560,7 @@ static var getStoredPathForModule (const String& id, const ProjectExporter& exp)
                                            exp.getTargetOSForExporter()).get();
 }
 
-ValueWithDefault ProjectExporter::getPathForModuleValue (const String& moduleID)
+ValueTreePropertyWithDefault ProjectExporter::getPathForModuleValue (const String& moduleID)
 {
     auto* um = getUndoManager();
 
@@ -662,6 +662,11 @@ void ProjectExporter::updateOldModulePaths()
     }
 }
 
+static bool areSameExporters (const ProjectExporter& p1, const ProjectExporter& p2)
+{
+    return p1.getExporterIdentifier() == p2.getExporterIdentifier();
+}
+
 static bool areCompatibleExporters (const ProjectExporter& p1, const ProjectExporter& p2)
 {
     return (p1.isVisualStudio() && p2.isVisualStudio())
@@ -673,39 +678,33 @@ static bool areCompatibleExporters (const ProjectExporter& p1, const ProjectExpo
 
 void ProjectExporter::createDefaultModulePaths()
 {
-    for (Project::ExporterIterator exporter (project); exporter.next();)
+    auto exporterToCopy = [this]() -> std::unique_ptr<ProjectExporter>
     {
-        if (areCompatibleExporters (*this, *exporter))
+        std::vector<std::unique_ptr<ProjectExporter>> exporters;
+
+        for (Project::ExporterIterator exporter (project); exporter.next();)
+            exporters.push_back (std::move (exporter.exporter));
+
+        auto getIf = [&exporters] (auto predicate)
         {
-            for (int i = project.getEnabledModules().getNumModules(); --i >= 0;)
-            {
-                auto modID = project.getEnabledModules().getModuleID (i);
-                getPathForModuleValue (modID) = exporter->getPathForModuleValue (modID);
-            }
+            auto iter = std::find_if (exporters.begin(), exporters.end(), predicate);
+            return iter != exporters.end() ? std::move (*iter) : nullptr;
+        };
 
-            return;
-        }
-    }
+        if (auto exporter = getIf ([this] (auto& x) { return areSameExporters (*this, *x); }))
+            return exporter;
 
-    for (Project::ExporterIterator exporter (project); exporter.next();)
-    {
-        if (exporter->canLaunchProject())
-        {
-            for (int i = project.getEnabledModules().getNumModules(); --i >= 0;)
-            {
-                auto modID = project.getEnabledModules().getModuleID (i);
-                getPathForModuleValue (modID) = exporter->getPathForModuleValue (modID);
-            }
+        if (auto exporter = getIf ([this] (auto& x) { return areCompatibleExporters (*this, *x); }))
+            return exporter;
 
-            return;
-        }
-    }
+        if (auto exporter = getIf ([] (auto& x) { return x->canLaunchProject(); }))
+            return exporter;
 
-    for (int i = project.getEnabledModules().getNumModules(); --i >= 0;)
-    {
-        auto modID = project.getEnabledModules().getModuleID (i);
-        getPathForModuleValue (modID) = "../../juce";
-    }
+        return {};
+    }();
+
+    for (const auto& modID : project.getEnabledModules().getAllModules())
+        getPathForModuleValue (modID) = (exporterToCopy != nullptr ? exporterToCopy->getPathForModuleString (modID) : "../../juce");
 }
 
 //==============================================================================
@@ -909,20 +908,22 @@ void ProjectExporter::BuildConfiguration::addGCCOptimisationProperty (PropertyLi
 
 void ProjectExporter::BuildConfiguration::addRecommendedLinuxCompilerWarningsProperty (PropertyListBuilder& props)
 {
+    recommendedWarningsValue.setDefault ("");
+
     props.add (new ChoicePropertyComponent (recommendedWarningsValue, "Add Recommended Compiler Warning Flags",
                                             { CompilerNames::gcc, CompilerNames::llvm, "Disabled" },
                                             { CompilerNames::gcc, CompilerNames::llvm, "" }),
                "Enable this to add a set of recommended compiler warning flags.");
-    recommendedWarningsValue.setDefault ("");
 }
 
 void ProjectExporter::BuildConfiguration::addRecommendedLLVMCompilerWarningsProperty (PropertyListBuilder& props)
 {
+    recommendedWarningsValue.setDefault ("");
+
     props.add (new ChoicePropertyComponent (recommendedWarningsValue, "Add Recommended Compiler Warning Flags",
                                             { "Enabled",           "Disabled" },
                                             { CompilerNames::llvm, "" }),
                "Enable this to add a set of recommended compiler warning flags.");
-    recommendedWarningsValue.setDefault ("");
 }
 
 ProjectExporter::BuildConfiguration::CompilerWarningFlags ProjectExporter::BuildConfiguration::getRecommendedCompilerWarningFlags() const
