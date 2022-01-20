@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.TOKEN }}      
       - run: |
           git fetch --prune --unshallow
       - name: "Run script"
