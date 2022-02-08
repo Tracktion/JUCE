@@ -126,10 +126,11 @@ public:
                            | NSTrackingEnabledDuringMouseDrag
                            | NSTrackingActiveAlways
                            | NSTrackingInVisibleRect;
-        [view addTrackingArea: [[NSTrackingArea alloc] initWithRect: r
-                                                            options: options
-                                                              owner: view
-                                                           userInfo: nil]];
+        const NSUniquePtr<NSTrackingArea> trackingArea { [[NSTrackingArea alloc] initWithRect: r
+                                                                                      options: options
+                                                                                        owner: view
+                                                                                     userInfo: nil] };
+        [view addTrackingArea: trackingArea.get()];
 
         notificationCenter = [NSNotificationCenter defaultCenter];
 
@@ -197,7 +198,7 @@ public:
             [window setExcludedFromWindowsMenu: (windowStyleFlags & windowIsTemporary) != 0];
             [window setIgnoresMouseEvents: (windowStyleFlags & windowIgnoresMouseClicks) != 0];
 
-            setCollectionBehaviour (false);
+            [window setCollectionBehavior: NSWindowCollectionBehaviorFullScreenPrimary];
 
             [window setRestorable: NO];
 
@@ -406,43 +407,16 @@ public:
         return [window isMiniaturized];
     }
 
-    NSWindowCollectionBehavior getCollectionBehavior (bool forceFullScreen) const
-    {
-        if (forceFullScreen)
-            return NSWindowCollectionBehaviorFullScreenPrimary;
-
-        // Some SDK versions don't define NSWindowCollectionBehaviorFullScreenNone
-        constexpr auto fullScreenNone = (NSUInteger) (1 << 9);
-
-        return (getStyleFlags() & (windowHasMaximiseButton | windowIsResizable)) == (windowHasMaximiseButton | windowIsResizable)
-             ? NSWindowCollectionBehaviorFullScreenPrimary
-             : fullScreenNone;
-    }
-
-    void setCollectionBehaviour (bool forceFullScreen) const
-    {
-        [window setCollectionBehavior: getCollectionBehavior (forceFullScreen)];
-    }
-
     void setFullScreen (bool shouldBeFullScreen) override
     {
         if (isSharedWindow)
             return;
 
-        setCollectionBehaviour (shouldBeFullScreen);
-
         if (isMinimised())
             setMinimised (false);
 
-        if (hasNativeTitleBar())
-        {
-            if (shouldBeFullScreen != isFullScreen())
-                [window toggleFullScreen: nil];
-        }
-        else
-        {
-            [window zoom: nil];
-        }
+        if (shouldBeFullScreen != isFullScreen())
+            [window toggleFullScreen: nil];
     }
 
     bool isFullScreen() const override
@@ -1599,7 +1573,6 @@ public:
         }
 
         [NSApp setPresentationOptions: NSApplicationPresentationDefault];
-        setCollectionBehaviour (isFullScreen());
     }
 
     void setHasChangedSinceSaved (bool b) override
@@ -1625,6 +1598,7 @@ public:
     String stringBeingComposed;
     NSNotificationCenter* notificationCenter = nil;
 
+    Rectangle<float> lastSizeBeforeZoom;
     RectangleList<float> deferredRepaints;
     uint32 lastRepaintTime;
 
@@ -2334,6 +2308,7 @@ struct JuceNSWindowClass   : public NSViewComponentPeerWrapper<ObjCClass<NSWindo
         addMethod (@selector (windowWillResize:toSize:),            windowWillResize);
         addMethod (@selector (windowDidExitFullScreen:),            windowDidExitFullScreen);
         addMethod (@selector (windowWillEnterFullScreen:),          windowWillEnterFullScreen);
+        addMethod (@selector (windowWillExitFullScreen:),           windowWillExitFullScreen);
         addMethod (@selector (windowWillStartLiveResize:),          windowWillStartLiveResize);
         addMethod (@selector (windowDidEndLiveResize:),             windowDidEndLiveResize);
         addMethod (@selector (window:shouldPopUpDocumentPathMenu:), shouldPopUpPathMenu);
@@ -2351,6 +2326,8 @@ struct JuceNSWindowClass   : public NSViewComponentPeerWrapper<ObjCClass<NSWindo
         addMethod (@selector (keyDown:),                            keyDown);
 
         addMethod (@selector (window:shouldDragDocumentWithEvent:from:withPasteboard:), shouldAllowIconDrag);
+
+        addMethod (@selector (toggleFullScreen:),                                         toggleFullScreen);
 
         addProtocol (@protocol (NSWindowDelegate));
 
@@ -2384,39 +2361,42 @@ private:
        #endif
     }
 
-    static NSRect windowWillUseStandardFrame (id self, SEL, NSWindow*, NSRect r)
+    static NSRect windowWillUseStandardFrame (id self, SEL, NSWindow* window, NSRect r)
     {
         if (auto* owner = getOwner (self))
         {
             if (auto* constrainer = owner->getConstrainer())
             {
-                const auto originalBounds = [&]() -> Rectangle<float>
+                if (auto* screen = [window screen])
                 {
-                    const auto screenBounds = owner->getComponent().getScreenBounds();
+                    const auto safeScreenBounds = convertToRectFloat (flippedScreenRect (owner->hasNativeTitleBar() ? r : [screen visibleFrame]));
+                    const auto originalBounds = owner->getFrameSize().addedTo (owner->getComponent().getScreenBounds()).toFloat();
+                    const auto expanded = originalBounds.withWidth  ((float) constrainer->getMaximumWidth())
+                                                        .withHeight ((float) constrainer->getMaximumHeight());
+                    const auto constrained = expanded.constrainedWithin (safeScreenBounds);
 
-                    if (const auto frameSize = owner->getFrameSizeIfPresent())
-                        return frameSize->addedTo (screenBounds).toFloat();
+                    return flippedScreenRect (makeNSRect ([&]
+                    {
+                        if (constrained == owner->getBounds().toFloat())
+                            return owner->lastSizeBeforeZoom.toFloat();
 
-                    return screenBounds.toFloat();
-                }();
-
-                const auto expanded = originalBounds.withWidth  ((float) constrainer->getMaximumWidth())
-                                                    .withHeight ((float) constrainer->getMaximumHeight());
-                const auto constrained = expanded.constrainedWithin (convertToRectFloat (flippedScreenRect (r)));
-                return flippedScreenRect (makeNSRect (constrained));
+                        owner->lastSizeBeforeZoom = owner->getBounds().toFloat();
+                        return constrained;
+                    }()));
+                }
             }
         }
 
         return r;
     }
 
-    static BOOL windowShouldZoomToFrame (id self, SEL, NSWindow* window, NSRect frame)
+    static BOOL windowShouldZoomToFrame (id self, SEL, NSWindow*, NSRect)
     {
         if (auto* owner = getOwner (self))
             if (owner->hasNativeTitleBar() && (owner->getStyleFlags() & ComponentPeer::windowIsResizable) == 0)
                 return NO;
 
-        return convertToRectFloat ([window frame]).withZeroOrigin() != convertToRectFloat (frame).withZeroOrigin();
+        return YES;
     }
 
     static BOOL canBecomeKeyWindow (id self, SEL)
@@ -2499,10 +2479,37 @@ private:
         return frameRect.size;
     }
 
+    static void toggleFullScreen (id self, SEL name, id sender)
+    {
+        if (auto* owner = getOwner (self))
+        {
+            const auto isFullScreen = owner->isFullScreen();
+
+            if (! isFullScreen)
+                owner->lastSizeBeforeZoom = owner->getBounds().toFloat();
+
+            sendSuperclassMessage<void> (self, name, sender);
+
+            if (isFullScreen)
+            {
+                [NSApp setPresentationOptions: NSApplicationPresentationDefault];
+                owner->setBounds (owner->lastSizeBeforeZoom.toNearestInt(), false);
+            }
+        }
+    }
+
     static void windowDidExitFullScreen (id self, SEL, NSNotification*)
     {
         if (auto* owner = getOwner (self))
             owner->resetWindowPresentation();
+    }
+
+    static void windowWillExitFullScreen (id self, SEL, NSNotification*)
+    {
+        // The exit-fullscreen animation looks bad on Monterey if the window isn't resizable...
+        if (auto* owner = getOwner (self))
+            if (auto* window = owner->window)
+                [window setStyleMask: [window styleMask] | NSWindowStyleMaskResizable];
     }
 
     static void windowWillEnterFullScreen (id self, SEL, NSNotification*)
