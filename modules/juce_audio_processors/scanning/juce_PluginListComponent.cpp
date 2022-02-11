@@ -300,8 +300,11 @@ PopupMenu PluginListComponent::createOptionsMenu()
                             .setEnabled (! list.getTypesForFormat (*format).isEmpty())
                             .setAction ([this, format]
                                         {
-                                            for (auto& pd : list.getTypesForFormat (*format))
-                                                list.removeType (pd);
+                                            auto title = "Remove all " + format->getName() + " plugins?";
+                                            auto message = "Are you sure you want to remove all " + format->getName() + " plugins?";
+                                            if (AlertWindow::showOkCancelBox (AlertWindow::QuestionIcon, title, message, TRANS("Yes"), TRANS("No")))
+                                                for (auto& pd : list.getTypesForFormat (*format))
+                                                    list.removeType (pd);
                                         }));
 
     menu.addSeparator();
