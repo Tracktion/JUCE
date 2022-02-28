@@ -246,12 +246,17 @@ private:
 
 void NamedPipe::close()
 {
+    {
+        ScopedReadLock sl (lock);
+
+        if (pimpl != nullptr)
+            pimpl->stopReadOperation = true;
+    }
+
     ScopedWriteLock sl (lock);
 
     if (pimpl != nullptr)
     {
-        pimpl->stopReadOperation = true;
-
         const char buffer[] { 0 };
         const auto done = ::write (pimpl->pipeIn.get(), buffer, numElementsInArray (buffer));
         ignoreUnused (done);
