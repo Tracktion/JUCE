@@ -546,7 +546,7 @@ private:
         if (bypassParameter == nullptr)
         {
             vst3WrapperProvidedBypassParam = true;
-            ownedBypassParameter.reset (new AudioParameterBool ("byps", "Bypass", false, {}, {}, {}));
+            ownedBypassParameter.reset (new AudioParameterBool ("byps", "Bypass", false));
             bypassParameter = ownedBypassParameter.get();
         }
 

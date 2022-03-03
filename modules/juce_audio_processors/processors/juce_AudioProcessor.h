@@ -1498,7 +1498,7 @@ private:
   #endif
 
     void checkForDuplicateTrimmedParamID (AudioProcessorParameter*);
-    void checkForUnsafeParamID (AudioProcessorParameter*);
+    void validateParameter (AudioProcessorParameter*);
     void checkForDuplicateParamID (AudioProcessorParameter*);
     void checkForDuplicateGroupIDs (const AudioProcessorParameterGroup&);
 
