@@ -2447,6 +2447,7 @@ private:
     static void* toFrontCallback1 (void* h)
     {
         BringWindowToTop ((HWND) h);
+        SetForegroundWindow ((HWND) h);
         return nullptr;
     }
 
