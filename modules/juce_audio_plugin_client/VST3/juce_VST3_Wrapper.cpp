@@ -3512,7 +3512,9 @@ private:
     struct LockedVSTComSmartPtr
     {
         LockedVSTComSmartPtr() = default;
-        LockedVSTComSmartPtr (const VSTComSmartPtr<T>& ptrIn)  : ptr (ptrIn)  {}
+        LockedVSTComSmartPtr (const VSTComSmartPtr<T>& ptrIn) : ptr (ptrIn)  {}
+        LockedVSTComSmartPtr (const LockedVSTComSmartPtr&) = default;
+        LockedVSTComSmartPtr& operator= (const LockedVSTComSmartPtr&) = default;
 
         ~LockedVSTComSmartPtr()
         {
