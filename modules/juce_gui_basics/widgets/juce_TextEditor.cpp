@@ -868,6 +868,12 @@ struct TextEditor::TextHolderComponent  : public Component,
 
     TextEditor& owner;
 
+private:
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override
+    {
+        return createIgnoredAccessibilityHandler (*this);
+    }
+
     JUCE_DECLARE_NON_COPYABLE (TextHolderComponent)
 };
 
@@ -894,6 +900,11 @@ struct TextEditor::TextEditorViewport  : public Viewport
     }
 
 private:
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override
+    {
+        return createIgnoredAccessibilityHandler (*this);
+    }
+
     TextEditor& owner;
     int lastWordWrapWidth = 0;
     bool reentrant = false;
@@ -2684,10 +2695,10 @@ void TextEditor::coalesceSimilarSections()
 }
 
 //==============================================================================
-class TextEditorAccessibilityHandler  : public AccessibilityHandler
+class TextEditor::EditorAccessibilityHandler  : public AccessibilityHandler
 {
 public:
-    explicit TextEditorAccessibilityHandler (TextEditor& textEditorToWrap)
+    explicit EditorAccessibilityHandler (TextEditor& textEditorToWrap)
         : AccessibilityHandler (textEditorToWrap,
                                 textEditorToWrap.isReadOnly() ? AccessibilityRole::staticText : AccessibilityRole::editableText,
                                 {},
@@ -2715,10 +2726,20 @@ private:
 
         void setSelection (Range<int> r) override
         {
+            if (r == textEditor.getHighlightedRegion())
+                return;
+
             if (r.isEmpty())
+            {
                 textEditor.setCaretPosition (r.getStart());
+            }
             else
-                textEditor.setHighlightedRegion (r);
+            {
+                const auto cursorAtStart = r.getEnd() == textEditor.getHighlightedRegion().getStart()
+                                        || r.getEnd() == textEditor.getHighlightedRegion().getEnd();
+                textEditor.moveCaretTo (cursorAtStart ? r.getEnd() : r.getStart(), false);
+                textEditor.moveCaretTo (cursorAtStart ? r.getStart() : r.getEnd(), true);
+            }
         }
 
         String getText (Range<int> r) const override
@@ -2764,12 +2785,12 @@ private:
     TextEditor& textEditor;
 
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TextEditorAccessibilityHandler)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EditorAccessibilityHandler)
 };
 
 std::unique_ptr<AccessibilityHandler> TextEditor::createAccessibilityHandler()
 {
-    return std::make_unique<TextEditorAccessibilityHandler> (*this);
+    return std::make_unique<EditorAccessibilityHandler> (*this);
 }
 
 } // namespace juce
