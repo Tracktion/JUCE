@@ -2182,13 +2182,13 @@ public:
         const Steinberg::int32 vstParamIndex;
         const Steinberg::Vst::ParamID paramID;
         const bool automatable;
-        const bool discrete = getNumSteps() != AudioProcessor::getDefaultNumParameterSteps();
         const int numSteps = [&]
         {
             auto stepCount = getParameterInfo().stepCount;
             return stepCount == 0 ? AudioProcessor::getDefaultNumParameterSteps()
                                   : stepCount + 1;
         }();
+        const bool discrete = getNumSteps() != AudioProcessor::getDefaultNumParameterSteps();
     };
 
     //==============================================================================
@@ -2670,12 +2670,9 @@ public:
         // call releaseResources first!
         jassert (! isActive);
 
-        bool result = syncBusLayouts (layouts);
-
-        // didn't succeed? Make sure it's back in its original state
-        if (! result)
-            syncBusLayouts (getBusesLayout());
-
+        const auto previousLayout = getBusesLayout();
+        const auto result = syncBusLayouts (layouts);
+        syncBusLayouts (previousLayout);
         return result;
     }
 
