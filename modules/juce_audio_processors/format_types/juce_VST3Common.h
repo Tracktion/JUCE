@@ -2,15 +2,15 @@
   ==============================================================================
 
    This file is part of the JUCE library.
-   Copyright (c) 2020 - Raw Material Software Limited
+   Copyright (c) 2022 - Raw Material Software Limited
 
    JUCE is an open source library subject to commercial or open-source
    licensing.
 
-   By using JUCE, you agree to the terms of both the JUCE 6 End-User License
-   Agreement and JUCE Privacy Policy (both effective as of the 16th June 2020).
+   By using JUCE, you agree to the terms of both the JUCE 7 End-User License
+   Agreement and JUCE Privacy Policy.
 
-   End User License Agreement: www.juce.com/juce-6-licence
+   End User License Agreement: www.juce.com/juce-7-licence
    Privacy Policy: www.juce.com/juce-privacy-policy
 
    Or: You may also use this code under the terms of the GPL v3 (see
@@ -1214,31 +1214,23 @@ public:
             if (eventList.getEvent (i, e) != Steinberg::kResultOk)
                 continue;
 
-            const auto message = toMidiMessage (e);
-
-            if (message.isValid)
-                result.addEvent (message.item, e.sampleOffset);
+            if (const auto message = toMidiMessage (e))
+                result.addEvent (*message, e.sampleOffset);
         }
     }
 
-    static void hostToPluginEventList (Steinberg::Vst::IEventList& result, MidiBuffer& midiBuffer,
-                                       Steinberg::Vst::IParameterChanges* parameterChanges,
-                                       const StoredMidiMapping& midiMapping)
+    template <typename Callback>
+    static void hostToPluginEventList (Steinberg::Vst::IEventList& result,
+                                       MidiBuffer& midiBuffer,
+                                       StoredMidiMapping& mapping,
+                                       Callback&& callback)
     {
-        toEventList (result,
-                     midiBuffer,
-                     parameterChanges,
-                     &midiMapping,
-                     EventConversionKind::hostToPlugin);
+        toEventList (result, midiBuffer, &mapping, callback);
     }
 
     static void pluginToHostEventList (Steinberg::Vst::IEventList& result, MidiBuffer& midiBuffer)
     {
-        toEventList (result,
-                     midiBuffer,
-                     nullptr,
-                     nullptr,
-                     EventConversionKind::pluginToHost);
+        toEventList (result, midiBuffer, nullptr, [] (auto&&...) {});
     }
 
 private:
@@ -1254,10 +1246,60 @@ private:
         pluginToHost
     };
 
-    static void toEventList (Steinberg::Vst::IEventList& result, MidiBuffer& midiBuffer,
-                             Steinberg::Vst::IParameterChanges* parameterChanges,
-                             const StoredMidiMapping* midiMapping,
-                             EventConversionKind kind)
+    template <typename Callback>
+    static bool sendMappedParameter (const MidiMessage& msg,
+                                     StoredMidiMapping* midiMapping,
+                                     Callback&& callback)
+    {
+        if (midiMapping == nullptr)
+            return false;
+
+        const auto controlEvent = toVst3ControlEvent (msg);
+
+        if (! controlEvent.hasValue())
+            return false;
+
+        const auto controlParamID = midiMapping->getMapping (createSafeChannel (msg.getChannel()),
+                                                             controlEvent->controllerNumber);
+
+        if (controlParamID != Steinberg::Vst::kNoParamId)
+            callback (controlParamID, controlEvent->paramValue);
+
+        return true;
+    }
+
+    template <typename Callback>
+    static void processMidiMessage (Steinberg::Vst::IEventList& result,
+                                    const MidiMessageMetadata metadata,
+                                    StoredMidiMapping* midiMapping,
+                                    Callback&& callback)
+    {
+        const auto msg = metadata.getMessage();
+
+        if (sendMappedParameter (msg, midiMapping, std::forward<Callback> (callback)))
+            return;
+
+        const auto kind = midiMapping != nullptr ? EventConversionKind::hostToPlugin
+                                                 : EventConversionKind::pluginToHost;
+
+        auto maybeEvent = createVstEvent (msg, metadata.data, kind);
+
+        if (! maybeEvent.hasValue())
+            return;
+
+        maybeEvent->busIndex = 0;
+        maybeEvent->sampleOffset = metadata.samplePosition;
+        result.addEvent (*maybeEvent);
+    }
+
+    /*  If mapping is non-null, the conversion is assumed to be host-to-plugin, or otherwise
+        plugin-to-host.
+    */
+    template <typename Callback>
+    static void toEventList (Steinberg::Vst::IEventList& result,
+                             MidiBuffer& midiBuffer,
+                             StoredMidiMapping* midiMapping,
+                             Callback&& callback)
     {
         enum { maxNumEvents = 2048 }; // Steinberg's Host Checker states that no more than 2048 events are allowed at once
         int numEvents = 0;
@@ -1267,38 +1309,7 @@ private:
             if (++numEvents > maxNumEvents)
                 break;
 
-            auto msg = metadata.getMessage();
-
-            if (midiMapping != nullptr && parameterChanges != nullptr)
-            {
-                Vst3MidiControlEvent controlEvent;
-
-                if (toVst3ControlEvent (msg, controlEvent))
-                {
-                    const auto controlParamID = midiMapping->getMapping (createSafeChannel (msg.getChannel()),
-                                                                         controlEvent.controllerNumber);
-
-                    if (controlParamID != Steinberg::Vst::kNoParamId)
-                    {
-                        Steinberg::int32 ignore;
-
-                        if (auto* queue = parameterChanges->addParameterData (controlParamID, ignore))
-                            queue->addPoint (metadata.samplePosition, controlEvent.paramValue, ignore);
-                    }
-
-                    continue;
-                }
-            }
-
-            auto maybeEvent = createVstEvent (msg, metadata.data, kind);
-
-            if (! maybeEvent.isValid)
-                continue;
-
-            auto& e = maybeEvent.item;
-            e.busIndex = 0;
-            e.sampleOffset = metadata.samplePosition;
-            result.addEvent (e);
+            processMidiMessage (result, metadata, midiMapping, std::forward<Callback> (callback));
         }
     }
 
@@ -1415,19 +1426,9 @@ private:
                                       msg.getQuarterFrameValue());
     }
 
-    template <typename Item>
-    struct BasicOptional final
-    {
-        BasicOptional() noexcept = default;
-        BasicOptional (const Item& i) noexcept : item { i }, isValid { true } {}
-
-        Item item;
-        bool isValid{};
-    };
-
-    static BasicOptional<Steinberg::Vst::Event> createVstEvent (const MidiMessage& msg,
-                                                                const uint8* midiEventData,
-                                                                EventConversionKind kind) noexcept
+    static Optional<Steinberg::Vst::Event> createVstEvent (const MidiMessage& msg,
+                                                           const uint8* midiEventData,
+                                                           EventConversionKind kind) noexcept
     {
         if (msg.isNoteOn())
             return createNoteOnEvent (msg);
@@ -1471,7 +1472,7 @@ private:
         return {};
     }
 
-    static BasicOptional<MidiMessage> toMidiMessage (const Steinberg::Vst::LegacyMIDICCOutEvent& e)
+    static Optional<MidiMessage> toMidiMessage (const Steinberg::Vst::LegacyMIDICCOutEvent& e)
     {
         if (e.controlNumber <= 127)
             return MidiMessage::controllerEvent (createSafeChannel (int16 (e.channel)),
@@ -1508,7 +1509,7 @@ private:
         }
     }
 
-    static BasicOptional<MidiMessage> toMidiMessage (const Steinberg::Vst::Event& e)
+    static Optional<MidiMessage> toMidiMessage (const Steinberg::Vst::Event& e)
     {
         switch (e.type)
         {
@@ -1555,104 +1556,24 @@ private:
         Steinberg::Vst::ParamValue paramValue;
     };
 
-    static bool toVst3ControlEvent (const MidiMessage& msg, Vst3MidiControlEvent& result)
+    static Optional<Vst3MidiControlEvent> toVst3ControlEvent (const MidiMessage& msg)
     {
         if (msg.isController())
-        {
-            result = { (Steinberg::Vst::CtrlNumber) msg.getControllerNumber(), msg.getControllerValue() / 127.0};
-            return true;
-        }
+            return Vst3MidiControlEvent { (Steinberg::Vst::CtrlNumber) msg.getControllerNumber(), msg.getControllerValue() / 127.0 };
 
         if (msg.isPitchWheel())
-        {
-            result = { Steinberg::Vst::kPitchBend, msg.getPitchWheelValue() / 16383.0};
-            return true;
-        }
+            return Vst3MidiControlEvent { Steinberg::Vst::kPitchBend, msg.getPitchWheelValue() / 16383.0};
 
         if (msg.isChannelPressure())
-        {
-            result = { Steinberg::Vst::kAfterTouch, msg.getChannelPressureValue() / 127.0};
-            return true;
-        }
+            return Vst3MidiControlEvent { Steinberg::Vst::kAfterTouch, msg.getChannelPressureValue() / 127.0};
 
-        result.controllerNumber = -1;
-        return false;
+        return {};
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiEventList)
 };
 
 //==============================================================================
-class FloatCache
-{
-    using FlagType = uint32_t;
-
-public:
-    FloatCache() = default;
-
-    explicit FloatCache (size_t sizeIn)
-        : values (sizeIn),
-          flags (divCeil (sizeIn, numFlagBits))
-    {
-        std::fill (values.begin(), values.end(), 0.0f);
-        std::fill (flags.begin(), flags.end(), 0);
-    }
-
-    size_t size() const noexcept { return values.size(); }
-
-    void setWithoutNotifying (size_t index, float value)
-    {
-        jassert (index < size());
-        values[index].store (value, std::memory_order_relaxed);
-    }
-
-    void set (size_t index, float value)
-    {
-        jassert (index < size());
-        const auto previous = values[index].exchange (value, std::memory_order_relaxed);
-        const auto bit = previous == value ? ((FlagType) 0) : ((FlagType) 1 << (index % numFlagBits));
-        flags[index / numFlagBits].fetch_or (bit, std::memory_order_acq_rel);
-    }
-
-    float get (size_t index) const noexcept
-    {
-        jassert (index < size());
-        return values[index].load (std::memory_order_relaxed);
-    }
-
-    /*  Calls the supplied callback for any entries which have been modified
-        since the last call to this function.
-    */
-    template <typename Callback>
-    void ifSet (Callback&& callback)
-    {
-        for (size_t flagIndex = 0; flagIndex < flags.size(); ++flagIndex)
-        {
-            const auto prevFlags = flags[flagIndex].exchange (0, std::memory_order_acq_rel);
-
-            for (size_t bit = 0; bit < numFlagBits; ++bit)
-            {
-                if (prevFlags & ((FlagType) 1 << bit))
-                {
-                    const auto itemIndex = (flagIndex * numFlagBits) + bit;
-                    callback (itemIndex, values[itemIndex].load (std::memory_order_relaxed));
-                }
-            }
-        }
-    }
-
-private:
-    static constexpr size_t numFlagBits = 8 * sizeof (FlagType);
-
-    static constexpr size_t divCeil (size_t a, size_t b)
-    {
-        return (a / b) + ((a % b) != 0);
-    }
-
-    std::vector<std::atomic<float>> values;
-    std::vector<std::atomic<FlagType>> flags;
-};
-
 /*  Provides very quick polling of all parameter states.
 
     We must iterate all parameters on each processBlock call to check whether any
@@ -1676,15 +1597,15 @@ public:
 
     Steinberg::Vst::ParamID getParamID (Steinberg::int32 index) const noexcept { return paramIds[(size_t) index]; }
 
-    void set                 (Steinberg::int32 index, float value)   { floatCache.set                 ((size_t) index, value); }
-    void setWithoutNotifying (Steinberg::int32 index, float value)   { floatCache.setWithoutNotifying ((size_t) index, value); }
+    void set                 (Steinberg::int32 index, float value)   { floatCache.setValueAndBits ((size_t) index, value, 1); }
+    void setWithoutNotifying (Steinberg::int32 index, float value)   { floatCache.setValue        ((size_t) index, value); }
 
     float get (Steinberg::int32 index) const noexcept { return floatCache.get ((size_t) index); }
 
     template <typename Callback>
     void ifSet (Callback&& callback)
     {
-        floatCache.ifSet ([&] (size_t index, float value)
+        floatCache.ifSet ([&] (size_t index, float value, uint32_t)
         {
             callback ((Steinberg::int32) index, value);
         });
@@ -1692,9 +1613,10 @@ public:
 
 private:
     std::vector<Steinberg::Vst::ParamID> paramIds;
-    FloatCache floatCache;
+    FlaggedFloatCache<1> floatCache;
 };
 
+//==============================================================================
 /*  Ensures that a 'restart' call only ever happens on the main thread. */
 class ComponentRestarter : private AsyncUpdater
 {

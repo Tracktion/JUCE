@@ -2,7 +2,7 @@
   ==============================================================================
 
    This file is part of the JUCE library.
-   Copyright (c) 2020 - Raw Material Software Limited
+   Copyright (c) 2022 - Raw Material Software Limited
 
    JUCE is an open source library subject to commercial or open-source
    licensing.
@@ -238,6 +238,7 @@ static LocalRef<jobject> getMulticastLock()
     return multicastLock;
 }
 
+JUCE_API void JUCE_CALLTYPE acquireMulticastLock();
 JUCE_API void JUCE_CALLTYPE acquireMulticastLock()
 {
     auto multicastLock = getMulticastLock();
@@ -246,6 +247,7 @@ JUCE_API void JUCE_CALLTYPE acquireMulticastLock()
         getEnv()->CallVoidMethod (multicastLock.get(), AndroidMulticastLock.acquire);
 }
 
+JUCE_API void JUCE_CALLTYPE releaseMulticastLock();
 JUCE_API void JUCE_CALLTYPE releaseMulticastLock()
 {
     auto multicastLock = getMulticastLock();
