@@ -2,7 +2,7 @@
   ==============================================================================
 
    This file is part of the JUCE examples.
-   Copyright (c) 2020 - Raw Material Software Limited
+   Copyright (c) 2022 - Raw Material Software Limited
 
    The code included in this file is provided under the terms of the ISC license
    http://www.isc.org/downloads/software-support-policy/isc-license. Permission
@@ -86,8 +86,9 @@ public:
         descriptionLabel.setMinimumHorizontalScale (1.0f);
         descriptionLabel.setText ("This demonstrates the JUCE_LIVE_CONSTANT macro, which allows you to quickly "
                                   "adjust primitive values at runtime by just wrapping them in a macro.\n\n"
+                                  "Editing JUCE_LIVE_CONSTANT values is only enabled in debug builds.\n\n"
                                   "To understand what's going on in this demo, you should have a look at the "
-                                  "LiveConstantDemoComponent class, where you can see the code that's invoking the demo below...",
+                                  "LiveConstantDemoComponent class, where you can see the code that's invoking the demo below.",
                                   dontSendNotification);
 
         addAndMakeVisible (descriptionLabel);
