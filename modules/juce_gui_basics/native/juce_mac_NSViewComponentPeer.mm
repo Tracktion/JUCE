@@ -215,10 +215,8 @@ public:
 
             [window setRestorable: NO];
 
-           #if defined (MAC_OS_X_VERSION_10_12) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12)
             if (@available (macOS 10.12, *))
                 [window setTabbingMode: NSWindowTabbingModeDisallowed];
-           #endif
 
             scopedObservers.emplace_back (view, frameChangedSelector, NSWindowDidMoveNotification, window);
             scopedObservers.emplace_back (view, frameChangedSelector, NSWindowDidMiniaturizeNotification, window);
@@ -1438,10 +1436,8 @@ public:
     {
         const auto type = []
         {
-           #if defined (MAC_OS_X_VERSION_10_13) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_13
             if (@available (macOS 10.13, *))
                 return NSPasteboardTypeFileURL;
-           #endif
 
             JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
             return (NSString*) kUTTypeFileURL;
@@ -1731,15 +1727,11 @@ private:
            #if JUCE_64BIT
             case NSEventTypeSmartMagnify:
             case NSEventTypePressure:
-           #endif
-          #if defined (MAC_OS_X_VERSION_10_12) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12
-           #if JUCE_64BIT
             case NSEventTypeDirectTouch:
            #endif
            #if defined (MAC_OS_X_VERSION_10_15) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_15
             case NSEventTypeChangeMode:
            #endif
-          #endif
             default:
                 return false;
         }
@@ -1995,13 +1987,11 @@ struct JuceNSViewClass   : public NSViewComponentPeerWrapper<ObjCClass<NSView>>
         {
             // Without setting contentsFormat macOS Big Sur will always set the invalid area
             // to be the entire frame.
-            #if defined (MAC_OS_X_VERSION_10_12) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12
             if (@available (macOS 10.12, *))
             {
                 CALayer* layer = ((NSView*) self).layer;
                 layer.contentsFormat = kCAContentsFormatRGBA8Uint;
             }
-            #endif
 
             sendSuperclassMessage<void> (self, @selector (viewWillDraw));
         });

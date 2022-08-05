@@ -575,12 +575,10 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
     return [[[NSBundle mainBundle] objectForInfoDictionaryKey: @"UIStatusBarHidden"] boolValue];
 }
 
-#if defined (__IPHONE_11_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0
  - (BOOL) prefersHomeIndicatorAutoHidden
  {
      return isKioskModeView (self);
  }
-#endif
 
 - (UIStatusBarStyle) preferredStatusBarStyle
 {
@@ -775,7 +773,6 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
 {
     [super traitCollectionDidChange: previousTraitCollection];
 
-   #if defined (__IPHONE_12_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_12_0
     if (@available (iOS 12.0, *))
     {
         const auto wasDarkModeActive = ([previousTraitCollection userInterfaceStyle] == UIUserInterfaceStyleDark);
@@ -784,7 +781,6 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
             [[NSNotificationCenter defaultCenter] postNotificationName: UIViewComponentPeer::getDarkModeNotificationName()
                                                                 object: nil];
     }
-   #endif
 }
 
 - (BOOL) isAccessibilityElement
