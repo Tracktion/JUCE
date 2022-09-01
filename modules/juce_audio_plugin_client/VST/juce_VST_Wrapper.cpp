@@ -68,6 +68,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4996 4100)
 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wconversion",
                                      "-Wshadow",
                                      "-Wdeprecated-register",
+                                     "-Wdeprecated-declarations",
                                      "-Wunused-parameter",
                                      "-Wdeprecated-writable-strings",
                                      "-Wnon-virtual-dtor",
@@ -1019,7 +1020,7 @@ public:
              // before that happens.
              X11Symbols::getInstance()->xFlush (display);
             #elif JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
-             checkHostWindowScaleFactor();
+             checkHostWindowScaleFactor (true);
              startTimer (500);
             #endif
            #elif JUCE_MAC
@@ -1223,12 +1224,12 @@ public:
         }
 
         #if JUCE_WIN_PER_MONITOR_DPI_AWARE
-         void checkHostWindowScaleFactor()
+         void checkHostWindowScaleFactor (bool force = false)
          {
              auto hostWindowScale = (float) getScaleFactorForWindow ((HostWindowType) hostWindow);
 
-             if (hostWindowScale > 0.0f && ! approximatelyEqual (hostWindowScale, wrapper.editorScaleFactor))
-                 wrapper.handleSetContentScaleFactor (hostWindowScale);
+             if (force || (hostWindowScale > 0.0f && ! approximatelyEqual (hostWindowScale, wrapper.editorScaleFactor)))
+                 wrapper.handleSetContentScaleFactor (hostWindowScale, force);
          }
 
          void timerCallback() override
@@ -2029,7 +2030,7 @@ private:
         return 0;
     }
 
-    pointer_sized_int handleSetContentScaleFactor (float scale)
+    pointer_sized_int handleSetContentScaleFactor (float scale, bool force = false)
     {
         checkWhetherMessageThreadIsCorrect();
        #if JUCE_LINUX || JUCE_BSD
@@ -2039,7 +2040,7 @@ private:
        #endif
 
        #if ! JUCE_MAC
-        if (! approximatelyEqual (scale, editorScaleFactor))
+        if (force || ! approximatelyEqual (scale, editorScaleFactor))
         {
             editorScaleFactor = scale;
 
@@ -2048,7 +2049,7 @@ private:
         }
 
        #else
-        ignoreUnused (scale);
+        ignoreUnused (scale, force);
        #endif
 
         return 1;
