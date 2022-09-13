@@ -1048,7 +1048,7 @@ public:
     struct XcodeTarget : build_tools::ProjectType::Target
     {
         //==============================================================================
-        XcodeTarget (build_tools::ProjectType::Target::Type targetType, const XcodeProjectExporter& exporter)
+        XcodeTarget (Type targetType, const XcodeProjectExporter& exporter)
             : Target (targetType),
               owner (exporter)
         {
@@ -1699,10 +1699,13 @@ public:
                 s.set ("CODE_SIGN_ENTITLEMENTS", getEntitlementsFilename().quoted());
 
             {
-                auto cppStandard = owner.project.getCppStandardString();
+                const auto cppStandard = [&]() -> String
+                {
+                    if (owner.project.getCppStandardString() == "latest")
+                        return owner.project.getLatestNumberedCppStandardString();
 
-                if (cppStandard == "latest")
-                    cppStandard = owner.project.getLatestNumberedCppStandardString();
+                    return owner.project.getCppStandardString();
+                }();
 
                 s.set ("CLANG_CXX_LANGUAGE_STANDARD", (String (owner.shouldUseGNUExtensions() ? "gnu++"
                                                                                               : "c++") + cppStandard).quoted());
@@ -1968,11 +1971,15 @@ public:
             StringArray paths (owner.extraSearchPaths);
             paths.addArray (config.getHeaderSearchPaths());
 
-            if (owner.project.getEnabledModules().isModuleEnabled ("juce_audio_plugin_client"))
+            constexpr auto audioPluginClient = "juce_audio_plugin_client";
+
+            if (owner.project.getEnabledModules().isModuleEnabled (audioPluginClient))
             {
-                // Needed to compile .r files
-                paths.add (owner.getModuleFolderRelativeToProject ("juce_audio_plugin_client")
-                                .rebased (owner.projectFolder, owner.getTargetFolder(), build_tools::RelativePath::buildTargetFolder)
+                paths.add (owner.getModuleFolderRelativeToProject (audioPluginClient)
+                                .getChildFile ("AU")
+                                .rebased (owner.projectFolder,
+                                          owner.getTargetFolder(),
+                                          build_tools::RelativePath::buildTargetFolder)
                                 .toUnixStyle());
             }
 

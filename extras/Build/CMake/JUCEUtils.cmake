@@ -87,12 +87,6 @@ set_property(GLOBAL PROPERTY JUCE_COPY_PLUGIN_AFTER_BUILD FALSE)
 if((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
     _juce_create_pkgconfig_target(JUCE_CURL_LINUX_DEPS libcurl)
     _juce_create_pkgconfig_target(JUCE_BROWSER_LINUX_DEPS webkit2gtk-4.0 gtk+-x11-3.0)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    find_program(JUCE_XCRUN xcrun)
-
-    if(NOT JUCE_XCRUN)
-        message(WARNING "failed to find xcrun; older resource-based AU plug-ins may not work correctly")
-    endif()
 endif()
 
 # We set up default/fallback copy dirs here. If you need different copy dirs, use
@@ -149,67 +143,6 @@ function(juce_add_bundle_resources_directory target folder)
             HEADER_FILE_ONLY TRUE
             MACOSX_PACKAGE_LOCATION "Resources/${resource_parent_path}")
     endforeach()
-endfunction()
-
-# ==================================================================================================
-
-function(_juce_add_au_resource_fork shared_code_target au_target)
-    if(NOT JUCE_XCRUN)
-        return()
-    endif()
-
-    get_target_property(product_name ${shared_code_target} JUCE_PRODUCT_NAME)
-    get_target_property(module_sources juce::juce_audio_plugin_client_AU INTERFACE_SOURCES)
-
-    list(FILTER module_sources INCLUDE REGEX "/juce_audio_plugin_client_AU.r$")
-
-    if(NOT module_sources)
-        message(FATAL_ERROR "Failed to find AU resource file input")
-    endif()
-
-    list(GET module_sources 0 au_rez_sources)
-
-    get_target_property(juce_library_code ${shared_code_target} JUCE_GENERATED_SOURCES_DIRECTORY)
-    # We don't want our AU AppConfig.h to end up on peoples' include paths if we can help it
-    set(secret_au_resource_dir "${juce_library_code}/${au_target}/secret")
-    set(secret_au_plugindefines "${secret_au_resource_dir}/JucePluginDefines.h")
-
-    set(au_rez_output "${secret_au_resource_dir}/${product_name}.rsrc")
-
-    target_sources(${au_target} PRIVATE "${au_rez_output}")
-    set_source_files_properties("${au_rez_output}" PROPERTIES
-        GENERATED TRUE
-        MACOSX_PACKAGE_LOCATION Resources)
-
-    set(defs_file $<GENEX_EVAL:$<TARGET_PROPERTY:${shared_code_target},JUCE_DEFS_FILE>>)
-
-    # Passing all our compile definitions using generator expressions is really painful
-    # because some of the definitions have pipes and quotes and dollars and goodness-knows
-    # what else that the shell would very much like to claim for itself, thank you very much.
-    # CMake definitely knows how to escape all these things, because it's perfectly happy to pass
-    # them to compiler invocations, but I have no idea how to get it to escape them
-    # in a custom command.
-    # In the end, it's simplest to generate a special single-purpose appconfig just for the
-    # resource compiler.
-    add_custom_command(OUTPUT "${secret_au_plugindefines}"
-        COMMAND juce::juceaide auplugindefines "${defs_file}" "${secret_au_plugindefines}"
-        DEPENDS "${defs_file}"
-        VERBATIM)
-
-    add_custom_command(OUTPUT "${au_rez_output}"
-        COMMAND "${JUCE_XCRUN}" Rez
-            -d "ppc_$ppc" -d "i386_$i386" -d "ppc64_$ppc64" -d "x86_64_$x86_64" -d "arm64_$arm64"
-            -I "${secret_au_resource_dir}"
-            -I "/System/Library/Frameworks/CoreServices.framework/Frameworks/CarbonCore.framework/Versions/A/Headers"
-            -I "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks/AudioUnit.framework/Headers"
-            -isysroot "${CMAKE_OSX_SYSROOT}"
-            "${au_rez_sources}"
-            -useDF
-            -o "${au_rez_output}"
-        DEPENDS "${secret_au_plugindefines}"
-        VERBATIM)
-
-    set(au_resource_directory "$<TARGET_BUNDLE_DIR:${au_target}>/Contents/Resources")
 endfunction()
 
 # ==================================================================================================
@@ -423,7 +356,7 @@ function(juce_add_binary_data target)
 
     target_sources(${target} PRIVATE "${binary_file_names}")
     target_include_directories(${target} INTERFACE ${juce_binary_data_folder})
-    target_compile_features(${target} PRIVATE cxx_std_14)
+    target_compile_features(${target} PRIVATE cxx_std_17)
 
     # This fixes an issue where Xcode is unable to find binary data during archive.
     if(CMAKE_GENERATOR STREQUAL "Xcode")
@@ -1038,6 +971,8 @@ function(_juce_set_plugin_target_properties shared_code_target kind)
         set(output_path "${products_folder}/${product_name}.lv2")
         set_target_properties(${target_name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${output_path}")
 
+        _juce_add_lv2_manifest_helper_target()
+
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND juce::juce_lv2_helper "$<TARGET_FILE:${target_name}>"
             VERBATIM)
@@ -1283,10 +1218,6 @@ function(_juce_configure_plugin_targets target)
 
     if(TARGET ${target}_Standalone)
         _juce_configure_app_bundle(${target} ${target}_Standalone)
-    endif()
-
-    if(TARGET ${target}_AU)
-        _juce_add_au_resource_fork(${target} ${target}_AU)
     endif()
 
     if(TARGET ${target}_AAX)
@@ -1783,6 +1714,21 @@ function(_juce_initialise_target target)
     _juce_write_generate_time_info(${target})
     _juce_link_optional_libraries(${target})
     _juce_fixup_module_source_groups()
+endfunction()
+
+# ==================================================================================================
+
+function(_juce_add_lv2_manifest_helper_target)
+    if(TARGET juce_lv2_helper)
+        return()
+    endif()
+
+    get_target_property(module_path juce::juce_audio_plugin_client INTERFACE_JUCE_MODULE_PATH)
+    add_executable(juce_lv2_helper "${module_path}/juce_audio_plugin_client/LV2/juce_LV2TurtleDumpProgram.cpp")
+    add_executable(juce::juce_lv2_helper ALIAS juce_lv2_helper)
+    target_compile_features(juce_lv2_helper PRIVATE cxx_std_17)
+    set_target_properties(juce_lv2_helper PROPERTIES BUILD_WITH_INSTALL_RPATH ON)
+    target_link_libraries(juce_lv2_helper PRIVATE ${CMAKE_DL_LIBS})
 endfunction()
 
 # ==================================================================================================
