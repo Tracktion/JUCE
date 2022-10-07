@@ -280,17 +280,6 @@ bool  JUCE_CALLTYPE SystemAudioVolume::setGain (float gain)   { return SystemVol
 bool  JUCE_CALLTYPE SystemAudioVolume::isMuted()              { return SystemVol (kAudioDevicePropertyMute).isMuted(); }
 bool  JUCE_CALLTYPE SystemAudioVolume::setMuted (bool mute)   { return SystemVol (kAudioDevicePropertyMute).setMuted (mute); }
 
-static double machToSeconds (UInt64 machTime)
-{
-    const int64_t kNanoPerS = 1000 * 1000 * 1000;
-    static mach_timebase_info_data_t s_timebase_info;
-    
-    if (s_timebase_info.denom == 0)
-        mach_timebase_info (&s_timebase_info);
-
-    return ((machTime * s_timebase_info.numer) / double (kNanoPerS * s_timebase_info.denom));
-}
-
 //==============================================================================
 struct CoreAudioClasses
 {
@@ -746,15 +735,6 @@ public:
     double getSampleRate() const  { return sampleRate; }
     int getBufferSize() const     { return bufferSize; }
 
-    void updateLatency (double now, double inputTimestamp, double outputTimestamp)
-    {
-        const auto inputLatencyTime = now - inputTimestamp;
-        const auto outputLatencyTime = outputTimestamp - now;
-        
-        inputLatency.store (roundToInt (inputLatencyTime * sampleRate), std::memory_order_relaxed);
-        outputLatency.store (roundToInt (outputLatencyTime * sampleRate), std::memory_order_relaxed);
-    }
-    
     void audioCallback (const AudioTimeStamp* inputTimestamp,
                         const AudioTimeStamp* outputTimestamp,
                         const AudioBufferList* inInputData,
@@ -1035,8 +1015,6 @@ public:
     static constexpr Float64 invalidSampleTime = std::numeric_limits<Float64>::max();
 
     CoreAudioIODevice& owner;
-    std::atomic<int> inputLatency { 0 };
-    std::atomic<int>  outputLatency { 0 };
     int bitDepth = 32;
     int xruns = 0;
     Array<double> sampleRates;
@@ -1128,17 +1106,6 @@ private:
                                  const AudioTimeStamp* inOutputTime,
                                  void* device)
     {
-        auto internal = static_cast<CoreAudioInternal*> (device);
-        
-        if (inNow->mFlags & kAudioTimeStampHostTimeValid
-            && inInputTime->mFlags & kAudioTimeStampHostTimeValid
-            && inOutputTime->mFlags & kAudioTimeStampHostTimeValid)
-        {
-            internal->updateLatency (machToSeconds (inNow->mHostTime),
-                                     machToSeconds (inInputTime->mHostTime),
-                                     machToSeconds (inOutputTime->mHostTime));
-        }
-        
         static_cast<CoreAudioInternal*> (device)->audioCallback (inInputTime, inOutputTime, inInputData, outOutputData);
         return noErr;
     }
@@ -2240,6 +2207,61 @@ public:
 
         if (in  == nullptr)  return out.release();
         if (out == nullptr)  return in.release();
+
+        auto combo = std::make_unique<AudioIODeviceCombiner> (combinedName, this, std::move (in), std::move (out));
+        return combo.release();
+    }
+
+    void audioDeviceListChanged()
+    {
+        scanForDevices();
+        callDeviceChangeListeners();
+    }
+
+    //==============================================================================
+private:
+    StringArray inputDeviceNames, outputDeviceNames;
+    Array<AudioDeviceID> inputIds, outputIds;
+
+    bool hasScanned = false;
+
+    void handleAsyncUpdate() override
+    {
+        audioDeviceListChanged();
+    }
+
+    static int getNumChannels (AudioDeviceID deviceID, bool input)
+    {
+        int total = 0;
+
+        if (auto bufList = audioObjectGetProperty<AudioBufferList> (deviceID, { kAudioDevicePropertyStreamConfiguration,
+                                                                                CoreAudioInternal::getScope (input),
+                                                                                juceAudioObjectPropertyElementMain }))
+        {
+            auto numStreams = (int) bufList->mNumberBuffers;
+
+            for (int i = 0; i < numStreams; ++i)
+                total += bufList->mBuffers[i].mNumberChannels;
+        }
+
+        return total;
+    }
+
+    static OSStatus hardwareListenerProc (AudioDeviceID, UInt32, const AudioObjectPropertyAddress*, void* clientData)
+    {
+        static_cast<CoreAudioIODeviceType*> (clientData)->triggerAsyncUpdate();
+        return noErr;
+    }
+
+    JUCE_DECLARE_WEAK_REFERENCEABLE (CoreAudioIODeviceType)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CoreAudioIODeviceType)
+};
+
+};
+
+#undef JUCE_COREAUDIOLOG
+
+} // namespace juce        if (out == nullptr)  return in.release();
 
         auto combo = std::make_unique<AudioIODeviceCombiner> (combinedName, this, std::move (in), std::move (out));
         return combo.release();
