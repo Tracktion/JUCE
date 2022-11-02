@@ -919,7 +919,10 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
     const auto rangeToDelete = range.isEmpty() ? range.withStartAndLength (jmax (range.getStart() - 1, 0),
                                                                            range.getStart() != 0 ? 1 : 0)
                                                : range;
+    const auto start = rangeToDelete.getStart();
 
+    // This ensures that the cursor is at the beginning, rather than the end, of the selection
+    target->setHighlightedRegion ({ start, start });
     target->setHighlightedRegion (rangeToDelete);
     target->insertTextAtCaret ("");
 }
@@ -1926,7 +1929,7 @@ void Desktop::allowedOrientationsChanged()
     {
         UIApplication* sharedApplication = [UIApplication sharedApplication];
 
-        const NSUniquePtr<UIWindowSceneGeometryPreferences> preferences { [UIWindowSceneGeometryPreferencesIOS alloc] };
+        const NSUniquePtr<UIWindowSceneGeometryPreferencesIOS> preferences { [UIWindowSceneGeometryPreferencesIOS alloc] };
         [preferences.get() initWithInterfaceOrientations: Orientations::getSupportedOrientations()];
 
         for (UIScene* scene in [sharedApplication connectedScenes])
