@@ -1432,15 +1432,21 @@ ComponentPeer* getPeerFor (::Window windowH)
     if (windowH == 0)
         return nullptr;
 
-    XPointer peer = nullptr;
-
     if (auto* display = XWindowSystem::getInstance()->getDisplay())
     {
         XWindowSystemUtilities::ScopedXLock xLock;
-        X11Symbols::getInstance()->xFindContext (display, (XID) windowH, windowHandleXContext, &peer);
+
+        if (XPointer peer = nullptr;
+            X11Symbols::getInstance()->xFindContext (display,
+                                                     static_cast<XID> (windowH),
+                                                     windowHandleXContext,
+                                                     &peer) == 0)
+        {
+            return unalignedPointerCast<ComponentPeer*> (peer);
+        }
     }
 
-    return unalignedPointerCast<ComponentPeer*> (peer);
+    return nullptr;
 }
 
 //==============================================================================
@@ -1543,7 +1549,7 @@ static int getAllEventsMask (bool ignoresMouseClicks)
                                                              &swa);
 
     // Set the window context to identify the window handle object
-    if (X11Symbols::getInstance()->xSaveContext (display, (XID) windowH, windowHandleXContext, (XPointer) peer))
+    if (! peer->setWindowAssociation (windowH))
     {
         // Failed
         jassertfalse;
@@ -1625,10 +1631,7 @@ void XWindowSystem::destroyWindow (::Window windowH)
 
     XWindowSystemUtilities::ScopedXLock xLock;
 
-    XPointer handlePointer;
-
-    if (! X11Symbols::getInstance()->xFindContext (display, (XID) windowH, windowHandleXContext, &handlePointer))
-        X11Symbols::getInstance()->xDeleteContext (display, (XID) windowH, windowHandleXContext);
+    peer->clearWindowAssociation();
 
     X11Symbols::getInstance()->xDestroyWindow (display, windowH);
 
@@ -2680,7 +2683,7 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
     return displays;
 }
 
-::Window XWindowSystem::createKeyProxy (::Window windowH) const
+::Window XWindowSystem::createKeyProxy (::Window windowH)
 {
     jassert (windowH != 0);
 
@@ -2694,7 +2697,6 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
                                                               &swa);
 
     X11Symbols::getInstance()->xMapWindow (display, keyProxy);
-    X11Symbols::getInstance()->xSaveContext (display, (XID) keyProxy, windowHandleXContext, (XPointer) this);
 
     return keyProxy;
 }
@@ -2702,11 +2704,6 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
 void XWindowSystem::deleteKeyProxy (::Window keyProxy) const
 {
     jassert (keyProxy != 0);
-
-    XPointer handlePointer;
-
-    if (! X11Symbols::getInstance()->xFindContext (display, (XID) keyProxy, windowHandleXContext, &handlePointer))
-          X11Symbols::getInstance()->xDeleteContext (display, (XID) keyProxy, windowHandleXContext);
 
     X11Symbols::getInstance()->xDestroyWindow (display, keyProxy);
     X11Symbols::getInstance()->xSync (display, false);
