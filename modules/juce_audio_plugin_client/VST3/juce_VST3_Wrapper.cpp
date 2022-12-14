@@ -2420,7 +2420,7 @@ class JuceVST3Component : public Vst::IComponent,
 {
 public:
     JuceVST3Component (Vst::IHostApplication* h)
-        : pluginInstance (createPluginFilterOfType (AudioProcessor::wrapperType_VST3)),
+        : pluginInstance (createPluginFilterOfType (AudioProcessor::wrapperType_VST3).release()),
           host (h)
     {
         inParameterChangedCallback = false;
@@ -2551,26 +2551,31 @@ public:
     //==============================================================================
     tresult PLUGIN_API setActive (TBool state) override
     {
-        active = (state != 0);
+        const auto willBeActive = (state != 0);
 
-        if (! state)
+        active = false;
+        // Some hosts may call setBusArrangements in response to calls made during prepareToPlay
+        // or releaseResources. Specifically, Wavelab 11.1 calls setBusArrangements in the same
+        // call stack when the AudioProcessor calls setLatencySamples inside prepareToPlay.
+        // In order for setBusArrangements to return successfully, the plugin must not be activated
+        // until after prepareToPlay has completely finished.
+        const ScopeGuard scope { [&] { active = willBeActive; } };
+
+        if (willBeActive)
         {
-            getPluginInstance().releaseResources();
+            const auto sampleRate = processSetup.sampleRate > 0.0
+                                  ? processSetup.sampleRate
+                                  : getPluginInstance().getSampleRate();
+
+            const auto bufferSize = processSetup.maxSamplesPerBlock > 0
+                                  ? (int) processSetup.maxSamplesPerBlock
+                                  : getPluginInstance().getBlockSize();
+
+            preparePlugin (sampleRate, bufferSize, CallPrepareToPlay::yes);
         }
         else
         {
-            auto sampleRate = getPluginInstance().getSampleRate();
-            auto bufferSize = getPluginInstance().getBlockSize();
-
-            sampleRate = processSetup.sampleRate > 0.0
-                            ? processSetup.sampleRate
-                            : sampleRate;
-
-            bufferSize = processSetup.maxSamplesPerBlock > 0
-                            ? (int) processSetup.maxSamplesPerBlock
-                            : bufferSize;
-
-            preparePlugin (sampleRate, bufferSize, CallPrepareToPlay::yes);
+            getPluginInstance().releaseResources();
         }
 
         return kResultOk;
@@ -4163,8 +4168,6 @@ using namespace juce;
 // The VST3 plugin entry point.
 extern "C" SMTG_EXPORT_SYMBOL IPluginFactory* PLUGIN_API GetPluginFactory()
 {
-    PluginHostType::jucePlugInClientCurrentWrapperType = AudioProcessor::wrapperType_VST3;
-
    #if (JUCE_MSVC || (JUCE_WINDOWS && JUCE_CLANG)) && JUCE_32BIT
     // Cunning trick to force this function to be exported. Life's too short to
     // faff around creating .def files for this kind of thing.
