@@ -2313,6 +2313,9 @@ public:
         /** If the component is valid, this deletes it and sets this pointer to null. */
         void deleteAndZero()                                  { delete getComponent(); }
 
+        bool operator== (const SafePointer<ComponentType>& component) const noexcept   { return weakRef == component; }
+        bool operator!= (const SafePointer<ComponentType>& component) const noexcept   { return weakRef != component; }
+
         bool operator== (ComponentType* component) const noexcept   { return weakRef == component; }
         bool operator!= (ComponentType* component) const noexcept   { return weakRef != component; }
 
