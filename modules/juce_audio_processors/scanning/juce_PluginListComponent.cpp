@@ -64,7 +64,7 @@ public:
             if (columnId == nameCol)
                 text = list.getBlacklistedFiles() [row - list.getNumTypes()];
             else if (columnId == descCol)
-                text = TRANS("Deactivated after failing to initialise correctly");
+                text = TRANS ("Deactivated after failing to initialise correctly");
         }
         else
         {
@@ -155,11 +155,11 @@ PluginListComponent::PluginListComponent (AudioPluginFormatManager& manager, Kno
 
     TableHeaderComponent& header = table.getHeader();
 
-    header.addColumn (TRANS("Name"),         TableModel::nameCol,         200, 100, 700, TableHeaderComponent::defaultFlags | TableHeaderComponent::sortedForwards);
-    header.addColumn (TRANS("Format"),       TableModel::typeCol,         80, 80, 80,    TableHeaderComponent::notResizable);
-    header.addColumn (TRANS("Category"),     TableModel::categoryCol,     100, 100, 200);
-    header.addColumn (TRANS("Manufacturer"), TableModel::manufacturerCol, 200, 100, 300);
-    header.addColumn (TRANS("Description"),  TableModel::descCol,         300, 100, 500, TableHeaderComponent::notSortable);
+    header.addColumn (TRANS ("Name"),         TableModel::nameCol,         200, 100, 700, TableHeaderComponent::defaultFlags | TableHeaderComponent::sortedForwards);
+    header.addColumn (TRANS ("Format"),       TableModel::typeCol,         80, 80, 80,    TableHeaderComponent::notResizable);
+    header.addColumn (TRANS ("Category"),     TableModel::categoryCol,     100, 100, 200);
+    header.addColumn (TRANS ("Manufacturer"), TableModel::manufacturerCol, 200, 100, 300);
+    header.addColumn (TRANS ("Description"),  TableModel::descCol,         300, 100, 500, TableHeaderComponent::notSortable);
 
     table.setHeaderHeight (22);
     table.setRowHeight (20);
@@ -289,7 +289,7 @@ void PluginListComponent::removePluginItem (int index)
 PopupMenu PluginListComponent::createOptionsMenu()
 {
     PopupMenu menu;
-    menu.addItem (PopupMenu::Item (TRANS("Clear list"))
+    menu.addItem (PopupMenu::Item (TRANS ("Clear list"))
                     .setAction ([this] { list.clear(); }));
 
     menu.addSeparator();
@@ -394,7 +394,7 @@ public:
           formatToScan (format),
           filesOrIdentifiersToScan (filesOrIdentifiers),
           propertiesToUse (properties),
-          pathChooserWindow (TRANS("Select folders to scan..."), String(), MessageBoxIconType::NoIcon),
+          pathChooserWindow (TRANS ("Select folders to scan..."), String(), MessageBoxIconType::NoIcon),
           progressWindow (title, text, MessageBoxIconType::NoIcon),
           numThreads (threads),
           allowAsync (allowPluginsWhichRequireAsynchronousInstantiation)
@@ -420,8 +420,8 @@ public:
             pathList.setPath (path);
 
             pathChooserWindow.addCustomComponent (&pathList);
-            pathChooserWindow.addButton (TRANS("Scan"),   1, KeyPress (KeyPress::returnKey));
-            pathChooserWindow.addButton (TRANS("Cancel"), 0, KeyPress (KeyPress::escapeKey));
+            pathChooserWindow.addButton (TRANS ("Scan"),   1, KeyPress (KeyPress::returnKey));
+            pathChooserWindow.addButton (TRANS ("Cancel"), 0, KeyPress (KeyPress::escapeKey));
 
             pathChooserWindow.enterModalState (true,
                                                ModalCallbackFunction::forComponent (startScanCallback,
@@ -458,6 +458,7 @@ private:
     std::atomic<bool> finished { false };
     std::unique_ptr<ThreadPool> pool;
     std::set<String> initiallyBlacklistedFiles;
+    ScopedMessageBox messageBox;
 
     static void startScanCallback (int result, AlertWindow* alert, Scanner* scanner)
     {
@@ -479,18 +480,23 @@ private:
 
             if (File::isAbsolutePath (f) && isStupidPath (File (f)))
             {
-                AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon,
-                                              TRANS("Plugin Scanning"),
-                                              TRANS("If you choose to scan folders that contain non-plugin files, "
-                                                    "then scanning may take a long time, and can cause crashes when "
-                                                    "attempting to load unsuitable files.")
-                                                + newLine
-                                                + TRANS ("Are you sure you want to scan the folder \"XYZ\"?")
-                                                   .replace ("XYZ", f),
-                                              TRANS ("Scan"),
-                                              String(),
-                                              nullptr,
-                                              ModalCallbackFunction::create (warnAboutStupidPathsCallback, this));
+                auto options = MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon,
+                                                                       TRANS ("Plugin Scanning"),
+                                                                       TRANS ("If you choose to scan folders that contain non-plugin files, "
+                                                                              "then scanning may take a long time, and can cause crashes when "
+                                                                              "attempting to load unsuitable files.")
+                                                                         + newLine
+                                                                         + TRANS ("Are you sure you want to scan the folder \"XYZ\"?")
+                                                                            .replace ("XYZ", f),
+                                                                       TRANS ("Scan"));
+                messageBox = AlertWindow::showScopedAsync (options, [this] (int result)
+                {
+                    if (result != 0)
+                        startScan();
+                    else
+                        finishedScan();
+                });
+
                 return;
             }
         }
@@ -527,14 +533,6 @@ private:
         return false;
     }
 
-    static void warnAboutStupidPathsCallback (int result, Scanner* scanner)
-    {
-        if (result != 0)
-            scanner->startScan();
-        else
-            scanner->finishedScan();
-    }
-
     void startScan()
     {
         pathChooserWindow.setVisible (false);
@@ -552,7 +550,7 @@ private:
             propertiesToUse->saveIfNeeded();
         }
 
-        progressWindow.addButton (TRANS("Cancel"), 0, KeyPress (KeyPress::escapeKey));
+        progressWindow.addButton (TRANS ("Cancel"), 0, KeyPress (KeyPress::escapeKey));
         progressWindow.addProgressBarComponent (progress);
         progressWindow.enterModalState();
 
@@ -602,7 +600,7 @@ private:
         if (finished)
             finishedScan();
         else
-            progressWindow.setMessage (TRANS("Testing") + ":\n\n" + pluginBeingScanned);
+            progressWindow.setMessage (TRANS ("Testing") + ":\n\n" + pluginBeingScanned);
     }
 
     bool doNextScan()
@@ -675,9 +673,12 @@ void PluginListComponent::scanFinished (const StringArray& failedFiles,
     currentScanner.reset(); // mustn't delete this before using the failed files array
 
     if (! warnings.isEmpty())
-        AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon,
-                                          TRANS("Scan complete"),
-                                          warnings.joinIntoString ("\n\n"));
+    {
+        auto options = MessageBoxOptions::makeOptionsOk (MessageBoxIconType::InfoIcon,
+                                                         TRANS ("Scan complete"),
+                                                         warnings.joinIntoString ("\n\n"));
+        messageBox = AlertWindow::showScopedAsync (options, nullptr);
+    }
 }
 
 } // namespace juce
