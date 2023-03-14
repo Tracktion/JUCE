@@ -23,4 +23,4 @@
   ==============================================================================
 */
 
-#include "utility/juce_PluginUtilities.cpp"
+#include "juce_audio_plugin_client_VST3.cpp"

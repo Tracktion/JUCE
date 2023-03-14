@@ -23,22 +23,4 @@
   ==============================================================================
 */
 
-#include <juce_audio_plugin_client/juce_audio_plugin_client.h>
-#include "juce_CreatePluginFilter.h"
-
-namespace juce
-{
-    #define Component juce::Component
-
-   #if JUCE_MAC
-    #define Point juce::Point
-    void repostCurrentNSEvent();
-   #endif
-
-    //==============================================================================
-    inline const PluginHostType& getHostType()
-    {
-        static PluginHostType hostType;
-        return hostType;
-    }
-}
+#include "juce_audio_plugin_client_VST2.cpp"
