@@ -50,7 +50,6 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wcast-function-type")
 #endif
 
 void juce_repeatLastProcessPriority();
-bool juce_isRunningInWine();
 
 using CheckEventBlockedByModalComps = bool (*) (const MSG&);
 extern CheckEventBlockedByModalComps isEventBlockedByModalComps;
@@ -4731,8 +4730,11 @@ bool KeyPress::isKeyCurrentlyDown (const int keyCode)
 }
 
 // (This internal function is used by the plugin client module)
+namespace detail
+{
 bool offerKeyMessageToJUCEWindow (MSG& m);
 bool offerKeyMessageToJUCEWindow (MSG& m)   { return HWNDComponentPeer::offerKeyMessageToJUCEWindow (m); }
+} // namespace detail
 
 //==============================================================================
 static DWORD getProcess (HWND hwnd)
