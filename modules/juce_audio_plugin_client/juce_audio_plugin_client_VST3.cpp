@@ -106,6 +106,21 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
 namespace juce
 {
 
+JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4310)
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wall")
+
+#if JUCE_VST3_CAN_REPLACE_VST2
+ static Steinberg::FUID getFUIDForVST2ID (bool forControllerUID)
+ {
+     Steinberg::TUID uuid;
+     detail::PluginUtilities::getUUIDForVST2ID (forControllerUID, (uint8*) uuid);
+     return Steinberg::FUID (uuid);
+ }
+#endif
+
+JUCE_END_IGNORE_WARNINGS_MSVC
+JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+
 using namespace Steinberg;
 
 //==============================================================================
@@ -583,7 +598,7 @@ public:
     bool isUsingManagedParameters() const noexcept    { return juceParameters.isUsingManagedParameters(); }
 
     //==============================================================================
-    static const FUID iid;
+    inline static const FUID iid { TUID INLINE_UID (0x0101ABAB, 0xABCDEF01, JucePlugin_ManufacturerCode, JucePlugin_PluginCode) };
 
 private:
     //==============================================================================
@@ -749,7 +764,12 @@ public:
     }
 
     //==============================================================================
-    static const FUID iid;
+
+   #if JUCE_VST3_CAN_REPLACE_VST2
+    inline static const FUID iid = getFUIDForVST2ID (true);
+   #else
+    inline static const FUID iid { TUID INLINE_UID (0xABCDEF01, 0x1234ABCD, JucePlugin_ManufacturerCode, JucePlugin_PluginCode) };
+   #endif
 
     //==============================================================================
     JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Winconsistent-missing-override")
@@ -998,7 +1018,7 @@ public:
                 }
 
                 {
-                    int64 colour;
+                    Steinberg::int64 colour;
                     if (list->getInt (Vst::ChannelContext::kChannelColorKey, colour) == kResultTrue)
                         trackProperties.colour = Colour (Vst::ChannelContext::GetRed ((uint32) colour),  Vst::ChannelContext::GetGreen ((uint32) colour),
                                                          Vst::ChannelContext::GetBlue ((uint32) colour), Vst::ChannelContext::GetAlpha ((uint32) colour));
@@ -1435,7 +1455,7 @@ private:
 
         flags &= ~pluginShouldBeMarkedDirtyFlag;
 
-        if (auto* handler = componentHandler)
+        if (auto* handler = componentHandler.get())
             handler->restartComponent (flags);
     }
 
@@ -2409,7 +2429,8 @@ private:
     {
         return createARAFactory();
     }
-    static const FUID iid;
+
+    inline static const FUID iid { TUID INLINE_UID (0xABCDEF01, 0xA1B2C3D4, JucePlugin_ManufacturerCode, JucePlugin_PluginCode) };
 
  private:
      //==============================================================================
@@ -2480,7 +2501,11 @@ public:
     AudioProcessor& getPluginInstance() const noexcept { return *pluginInstance; }
 
     //==============================================================================
-    static const FUID iid;
+   #if JUCE_VST3_CAN_REPLACE_VST2
+    inline static const FUID iid = getFUIDForVST2ID (false);
+   #else
+    inline static const FUID iid { TUID INLINE_UID (0xABCDEF01, 0x9182FAEB, JucePlugin_ManufacturerCode, JucePlugin_PluginCode) };
+   #endif
 
     JUCE_DECLARE_VST3_COM_REF_METHODS
 
@@ -2965,7 +2990,7 @@ public:
     Optional<PositionInfo> getPosition() const override
     {
         PositionInfo info;
-        info.setTimeInSamples (jmax ((juce::int64) 0, processContext.projectTimeSamples));
+        info.setTimeInSamples (jmax ((Steinberg::int64) 0, processContext.projectTimeSamples));
         info.setTimeInSeconds (static_cast<double> (*info.getTimeInSamples()) / processContext.sampleRate);
         info.setIsRecording ((processContext.state & Vst::ProcessContext::kRecording) != 0);
         info.setIsPlaying ((processContext.state & Vst::ProcessContext::kPlaying) != 0);
@@ -3826,45 +3851,11 @@ private:
     std::atomic<bool> isMidiOutputBusEnabled { true };
    #endif
 
-    static const char* kJucePrivateDataIdentifier;
+    inline static constexpr const char* kJucePrivateDataIdentifier = "JUCEPrivateData";
     CriticalSection flStudioDIYSpecificationEnforcementMutex;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuceVST3Component)
 };
-
-const char* JuceVST3Component::kJucePrivateDataIdentifier = "JUCEPrivateData";
-
-//==============================================================================
-JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4310)
-JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wall")
-
-DECLARE_CLASS_IID (JuceAudioProcessor, 0x0101ABAB, 0xABCDEF01, JucePlugin_ManufacturerCode, JucePlugin_PluginCode)
-DEF_CLASS_IID (JuceAudioProcessor)
-
-#if JUCE_VST3_CAN_REPLACE_VST2
- static FUID getFUIDForVST2ID (bool forControllerUID)
- {
-     TUID uuid;
-     detail::PluginUtilities::getUUIDForVST2ID (forControllerUID, (uint8*) uuid);
-     return FUID (uuid);
- }
- const Steinberg::FUID JuceVST3Component     ::iid (getFUIDForVST2ID (false));
- const Steinberg::FUID JuceVST3EditController::iid (getFUIDForVST2ID (true));
-#else
- DECLARE_CLASS_IID (JuceVST3EditController, 0xABCDEF01, 0x1234ABCD, JucePlugin_ManufacturerCode, JucePlugin_PluginCode)
- DEF_CLASS_IID (JuceVST3EditController)
-
- DECLARE_CLASS_IID (JuceVST3Component, 0xABCDEF01, 0x9182FAEB, JucePlugin_ManufacturerCode, JucePlugin_PluginCode)
- DEF_CLASS_IID (JuceVST3Component)
-#endif
-
-#if JucePlugin_Enable_ARA
- DECLARE_CLASS_IID (JuceARAFactory, 0xABCDEF01, 0xA1B2C3D4, JucePlugin_ManufacturerCode, JucePlugin_PluginCode)
- DEF_CLASS_IID (JuceARAFactory)
-#endif
-
-JUCE_END_IGNORE_WARNINGS_MSVC
-JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 //==============================================================================
 bool initModule();
@@ -3973,62 +3964,82 @@ bool shutdownModule()
  }
 #endif
 
+// See https://steinbergmedia.github.io/vst3_dev_portal/pages/FAQ/Compatibility+with+VST+2.x+or+VST+1.html
+class JucePluginCompatibility : public IPluginCompatibility
+{
+public:
+    virtual ~JucePluginCompatibility() = default;
+
+    JUCE_DECLARE_VST3_COM_REF_METHODS
+
+    tresult PLUGIN_API getCompatibilityJSON (IBStream* stream) override
+    {
+        auto filter = createPluginFilterOfType (AudioProcessor::WrapperType::wrapperType_VST3);
+        auto* extensions = dynamic_cast<const VST3ClientExtensions*> (filter.get());
+
+        if (extensions == nullptr || extensions->getCompatibleClasses().empty())
+            return kResultFalse;
+
+        DynamicObject::Ptr object { new DynamicObject };
+
+        // New iid is the ID of our Audio Effect class
+        object->setProperty ("New", String (VST3::UID (JuceVST3Component::iid).toString()));
+        object->setProperty ("Old", [&]
+        {
+            Array<var> oldArray;
+
+            for (const auto& uid : extensions->getCompatibleClasses())
+            {
+                // All UIDs returned from getCompatibleClasses should be 32 characters long
+                jassert (uid.length() == 32);
+
+                // All UIDs returned from getCompatibleClasses should be in hex notation
+                jassert (uid.containsOnly ("ABCDEF0123456789"));
+
+                oldArray.add (uid);
+            }
+
+            return oldArray;
+        }());
+
+        MemoryOutputStream memory;
+        JSON::writeToStream (memory, var { Array<var> { object.get() } });
+        return stream->write (memory.getMemoryBlock().getData(), (Steinberg::int32) memory.getDataSize());
+    }
+
+    tresult PLUGIN_API queryInterface (const TUID targetIID, void** obj) override
+    {
+        const auto result = testForMultiple (*this,
+                                             targetIID,
+                                             UniqueBase<IPluginCompatibility>{},
+                                             UniqueBase<FUnknown>{});
+
+        if (result.isOk())
+            return result.extract (obj);
+
+        jassertfalse; // Something new?
+        *obj = nullptr;
+        return kNotImplemented;
+    }
+
+    inline static const FUID iid { TUID INLINE_UID (0xABCDEF01, 0xC0DEF00D, JucePlugin_ManufacturerCode, JucePlugin_PluginCode) };
+
+private:
+    std::atomic<int> refCount { 1 };
+};
+
 //==============================================================================
 /** This typedef represents VST3's createInstance() function signature */
 using CreateFunction = FUnknown* (*)(Vst::IHostApplication*);
-
-static FUnknown* createComponentInstance (Vst::IHostApplication* host)
-{
-    return static_cast<Vst::IAudioProcessor*> (new JuceVST3Component (host));
-}
-
-static FUnknown* createControllerInstance (Vst::IHostApplication* host)
-{
-    return static_cast<Vst::IEditController*> (new JuceVST3EditController (host));
-}
-
-#if JucePlugin_Enable_ARA
- static FUnknown* createARAFactoryInstance (Vst::IHostApplication* /*host*/)
- {
-    return static_cast<ARA::IMainFactory*> (new JuceARAFactory());
- }
-#endif
-
-//==============================================================================
-struct JucePluginFactory;
-static JucePluginFactory* globalFactory = nullptr;
 
 //==============================================================================
 struct JucePluginFactory  : public IPluginFactory3
 {
     JucePluginFactory()
         : factoryInfo (JucePlugin_Manufacturer, JucePlugin_ManufacturerWebsite,
-                       JucePlugin_ManufacturerEmail, Vst::kDefaultFactoryFlags)
-    {
-    }
+                       JucePlugin_ManufacturerEmail, Vst::kDefaultFactoryFlags) {}
 
-    virtual ~JucePluginFactory()
-    {
-        if (globalFactory == this)
-            globalFactory = nullptr;
-    }
-
-    //==============================================================================
-    bool registerClass (const PClassInfo2& info, CreateFunction createFunction)
-    {
-        if (createFunction == nullptr)
-        {
-            jassertfalse;
-            return false;
-        }
-
-        auto entry = std::make_unique<ClassEntry> (info, createFunction);
-        entry->infoW.fromAscii (info);
-
-        classes.push_back (std::move (entry));
-
-        return true;
-    }
+    virtual ~JucePluginFactory() = default;
 
     //==============================================================================
     JUCE_DECLARE_VST3_COM_REF_METHODS
@@ -4053,7 +4064,7 @@ struct JucePluginFactory  : public IPluginFactory3
     //==============================================================================
     Steinberg::int32 PLUGIN_API countClasses() override
     {
-        return (Steinberg::int32) classes.size();
+        return (Steinberg::int32) getClassEntries().size();
     }
 
     tresult PLUGIN_API getFactoryInfo (PFactoryInfo* info) override
@@ -4079,11 +4090,8 @@ struct JucePluginFactory  : public IPluginFactory3
     {
         if (info != nullptr)
         {
-            if (auto& entry = classes[(size_t) index])
-            {
-                memcpy (info, &entry->infoW, sizeof (PClassInfoW));
-                return kResultOk;
-            }
+            memcpy (info, &getClassEntries()[static_cast<size_t> (index)].infoW, sizeof (PClassInfoW));
+            return kResultOk;
         }
 
         return kInvalidArgument;
@@ -4118,11 +4126,11 @@ struct JucePluginFactory  : public IPluginFactory3
         TUID iidToQuery;
         sourceFuid.toTUID (iidToQuery);
 
-        for (auto& entry : classes)
+        for (auto& entry : getClassEntries())
         {
-            if (doUIDsMatch (entry->infoW.cid, cid))
+            if (doUIDsMatch (entry.infoW.cid, cid))
             {
-                if (auto* instance = entry->createFunction (host))
+                if (auto* instance = entry.createFunction (host))
                 {
                     const FReleaser releaser (instance);
 
@@ -4161,21 +4169,103 @@ private:
     //==============================================================================
     struct ClassEntry
     {
-        ClassEntry() noexcept {}
-
         ClassEntry (const PClassInfo2& info, CreateFunction fn) noexcept
-            : info2 (info), createFunction (fn) {}
+            : info2 (info), createFunction (fn)
+        {
+            infoW.fromAscii (info);
+        }
 
         PClassInfo2 info2;
         PClassInfoW infoW;
         CreateFunction createFunction = {};
-        bool isUnicode = false;
 
     private:
         JUCE_DECLARE_NON_COPYABLE (ClassEntry)
     };
 
-    std::vector<std::unique_ptr<ClassEntry>> classes;
+    static Span<const ClassEntry> getClassEntries()
+    {
+      #ifndef JucePlugin_Vst3ComponentFlags
+       #if JucePlugin_IsSynth
+        #define JucePlugin_Vst3ComponentFlags Vst::kSimpleModeSupported
+       #else
+        #define JucePlugin_Vst3ComponentFlags 0
+       #endif
+      #endif
+
+      #ifndef JucePlugin_Vst3Category
+       #if JucePlugin_IsSynth
+        #define JucePlugin_Vst3Category Vst::PlugType::kInstrumentSynth
+       #else
+        #define JucePlugin_Vst3Category Vst::PlugType::kFx
+       #endif
+      #endif
+
+        static const PClassInfo2 compatibilityClass { JucePluginCompatibility::iid,
+                                                      PClassInfo::kManyInstances,
+                                                      kPluginCompatibilityClass,
+                                                      JucePlugin_Name,
+                                                      0,
+                                                      "",
+                                                      JucePlugin_Manufacturer,
+                                                      JucePlugin_VersionString,
+                                                      kVstVersionString };
+
+        static const PClassInfo2 componentClass { JuceVST3Component::iid,
+                                                  PClassInfo::kManyInstances,
+                                                  kVstAudioEffectClass,
+                                                  JucePlugin_Name,
+                                                  JucePlugin_Vst3ComponentFlags,
+                                                  JucePlugin_Vst3Category,
+                                                  JucePlugin_Manufacturer,
+                                                  JucePlugin_VersionString,
+                                                  kVstVersionString };
+
+        static const PClassInfo2 controllerClass { JuceVST3EditController::iid,
+                                                   PClassInfo::kManyInstances,
+                                                   kVstComponentControllerClass,
+                                                   JucePlugin_Name,
+                                                   JucePlugin_Vst3ComponentFlags,
+                                                   JucePlugin_Vst3Category,
+                                                   JucePlugin_Manufacturer,
+                                                   JucePlugin_VersionString,
+                                                   kVstVersionString };
+       #if JucePlugin_Enable_ARA
+        static const PClassInfo2 araFactoryClass { JuceARAFactory::iid,
+                                                   PClassInfo::kManyInstances,
+                                                   kARAMainFactoryClass,
+                                                   JucePlugin_Name,
+                                                   JucePlugin_Vst3ComponentFlags,
+                                                   JucePlugin_Vst3Category,
+                                                   JucePlugin_Manufacturer,
+                                                   JucePlugin_VersionString,
+                                                   kVstVersionString };
+       #endif
+
+        static const ClassEntry classEntries[]
+        {
+            ClassEntry { compatibilityClass, [] (Vst::IHostApplication*) -> Steinberg::FUnknown*
+            {
+                return new JucePluginCompatibility;
+            } },
+            ClassEntry { componentClass, [] (Vst::IHostApplication* h) -> Steinberg::FUnknown*
+            {
+                return static_cast<Vst::IAudioProcessor*> (new JuceVST3Component (h));
+            } },
+            ClassEntry { controllerClass, [] (Vst::IHostApplication* h) -> Steinberg::FUnknown*
+            {
+                return static_cast<Vst::IEditController*> (new JuceVST3EditController (h));
+            } },
+           #if JucePlugin_Enable_ARA
+            ClassEntry { araFactoryClass, [] (Vst::IHostApplication*) -> Steinberg::FUnknown*
+            {
+                return static_cast<ARA::IMainFactory*> (new JuceARAFactory);
+            } },
+           #endif
+        };
+
+        return Span { classEntries };
+    }
 
     //==============================================================================
     template <class PClassInfoType>
@@ -4184,15 +4274,8 @@ private:
         if (info != nullptr)
         {
             zerostruct (*info);
-
-            if (auto& entry = classes[(size_t) index])
-            {
-                if (entry->isUnicode)
-                    return kResultFalse;
-
-                memcpy (info, (PClassInfoType*) &entry->info2, sizeof (PClassInfoType));
-                return kResultOk;
-            }
+            memcpy (info, (PClassInfoType*) &getClassEntries()[static_cast<size_t> (index)].info2, sizeof (PClassInfoType));
+            return kResultOk;
         }
 
         jassertfalse;
@@ -4208,22 +4291,6 @@ private:
 } // namespace juce
 
 //==============================================================================
-#ifndef JucePlugin_Vst3ComponentFlags
- #if JucePlugin_IsSynth
-  #define JucePlugin_Vst3ComponentFlags Vst::kSimpleModeSupported
- #else
-  #define JucePlugin_Vst3ComponentFlags 0
- #endif
-#endif
-
-#ifndef JucePlugin_Vst3Category
- #if JucePlugin_IsSynth
-  #define JucePlugin_Vst3Category Vst::PlugType::kInstrumentSynth
- #else
-  #define JucePlugin_Vst3Category Vst::PlugType::kFx
- #endif
-#endif
-
 using namespace juce;
 
 //==============================================================================
@@ -4237,54 +4304,14 @@ extern "C" SMTG_EXPORT_SYMBOL IPluginFactory* PLUGIN_API GetPluginFactory()
     #pragma comment(linker, "/EXPORT:GetPluginFactory=_GetPluginFactory@0")
    #endif
 
+    static JucePluginFactory* globalFactory = nullptr;
+
     if (globalFactory == nullptr)
-    {
         globalFactory = new JucePluginFactory();
-
-        static const PClassInfo2 componentClass (JuceVST3Component::iid,
-                                                 PClassInfo::kManyInstances,
-                                                 kVstAudioEffectClass,
-                                                 JucePlugin_Name,
-                                                 JucePlugin_Vst3ComponentFlags,
-                                                 JucePlugin_Vst3Category,
-                                                 JucePlugin_Manufacturer,
-                                                 JucePlugin_VersionString,
-                                                 kVstVersionString);
-
-        globalFactory->registerClass (componentClass, createComponentInstance);
-
-        static const PClassInfo2 controllerClass (JuceVST3EditController::iid,
-                                                  PClassInfo::kManyInstances,
-                                                  kVstComponentControllerClass,
-                                                  JucePlugin_Name,
-                                                  JucePlugin_Vst3ComponentFlags,
-                                                  JucePlugin_Vst3Category,
-                                                  JucePlugin_Manufacturer,
-                                                  JucePlugin_VersionString,
-                                                  kVstVersionString);
-
-        globalFactory->registerClass (controllerClass, createControllerInstance);
-
-       #if JucePlugin_Enable_ARA
-        static const PClassInfo2 araFactoryClass (JuceARAFactory::iid,
-                                                  PClassInfo::kManyInstances,
-                                                  kARAMainFactoryClass,
-                                                  JucePlugin_Name,
-                                                  JucePlugin_Vst3ComponentFlags,
-                                                  JucePlugin_Vst3Category,
-                                                  JucePlugin_Manufacturer,
-                                                  JucePlugin_VersionString,
-                                                  kVstVersionString);
-
-        globalFactory->registerClass (araFactoryClass, createARAFactoryInstance);
-       #endif
-    }
     else
-    {
         globalFactory->addRef();
-    }
 
-    return dynamic_cast<IPluginFactory*> (globalFactory);
+    return globalFactory;
 }
 
 //==============================================================================
