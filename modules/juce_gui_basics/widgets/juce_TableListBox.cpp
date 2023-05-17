@@ -219,7 +219,7 @@ public:
         return std::make_unique<RowAccessibilityHandler> (*this);
     }
 
-    ListBox& getOwner() const { return owner; }
+    TableListBox& getOwner() const { return owner; }
 
 private:
     //==============================================================================
