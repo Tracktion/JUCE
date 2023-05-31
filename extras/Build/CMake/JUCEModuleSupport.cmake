@@ -444,7 +444,9 @@ function(juce_add_module module_path)
     _juce_module_sources("${module_path}" "${base_path}" globbed_sources headers)
 
     if(${module_name} STREQUAL "juce_audio_plugin_client")
-        list(REMOVE_ITEM headers "${module_path}/LV2/juce_LV2TurtleDumpProgram.cpp")
+        list(REMOVE_ITEM headers
+            "${module_path}/LV2/juce_LV2ManifestHelper.cpp"
+            "${module_path}/VST3/juce_VST3ManifestHelper.cpp")
 
         _juce_get_platform_plugin_kinds(plugin_kinds)
 

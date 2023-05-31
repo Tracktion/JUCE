@@ -856,10 +856,8 @@ private:
 //==============================================================================
 struct DescriptionLister
 {
-    static std::vector<PluginDescription> findDescriptionsFast (const File& file)
+    static std::vector<PluginDescription> tryLoadFast (const File& file, const File& moduleinfo)
     {
-        const auto moduleinfo = file.getChildFile ("Contents").getChildFile ("moduleinfo.json");
-
         if (! moduleinfo.existsAsFile())
             return {};
 
@@ -875,6 +873,16 @@ struct DescriptionLister
             return {};
 
         return createPluginDescriptions (file, *parsed);
+    }
+
+    static std::vector<PluginDescription> findDescriptionsFast (const File& file)
+    {
+        const auto moduleinfoNewLocation = file.getChildFile ("Contents").getChildFile ("Resources").getChildFile ("moduleinfo.json");
+
+        if (const auto loaded = tryLoadFast (file, moduleinfoNewLocation); ! loaded.empty())
+            return loaded;
+
+        return tryLoadFast (file, file.getChildFile ("Contents").getChildFile ("moduleinfo.json"));
     }
 
     static std::vector<PluginDescription> findDescriptionsSlow (VST3HostContext& host,
@@ -1469,9 +1477,10 @@ static std::shared_ptr<const ARA::ARAFactory> getARAFactory (VST3ModuleHandle& m
 }
 
 //==============================================================================
-struct VST3PluginWindow : public AudioProcessorEditor,
-                          private ComponentMovementWatcher,
-                          private IPlugFrame
+struct VST3PluginWindow final : public AudioProcessorEditor,
+                                private ComponentMovementWatcher,
+                                private ComponentBoundsConstrainer,
+                                private IPlugFrame
 {
     VST3PluginWindow (AudioPluginInstance* owner, IPlugView* pluginView)
         : AudioProcessorEditor (owner),
@@ -1484,12 +1493,15 @@ struct VST3PluginWindow : public AudioProcessorEditor,
         setSize (10, 10);
         setOpaque (true);
         setVisible (true);
+        setConstrainer (this);
 
         warnOnFailure (view->setFrame (this));
         view->queryInterface (Steinberg::IPlugViewContentScaleSupport::iid, (void**) &scaleInterface);
 
         setContentScaleFactor();
         resizeToFit();
+
+        setResizable (view->canResize() == kResultTrue, false);
     }
 
     ~VST3PluginWindow() override
@@ -1555,6 +1567,19 @@ struct VST3PluginWindow : public AudioProcessorEditor,
     bool keyPressed (const KeyPress& /*key*/) override  { return true; }
 
 private:
+    void checkBounds (Rectangle<int>& bounds,
+                      const Rectangle<int>&,
+                      const Rectangle<int>&,
+                      bool,
+                      bool,
+                      bool,
+                      bool) override
+    {
+        auto rect = componentToVST3Rect (bounds);
+        view->checkSizeConstraint (&rect);
+        bounds = vst3ToComponentRect (rect);
+    }
+
     //==============================================================================
     void componentPeerChanged() override {}
 
