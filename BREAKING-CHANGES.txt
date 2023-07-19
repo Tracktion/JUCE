@@ -6,6 +6,48 @@ develop
 
 Change
 ------
+Thread::wait and WaitableEvent::wait now take a double rather than an int to
+indicate the number of milliseconds to wait.
+
+Possible Issues
+---------------
+Calls to either wait function may trigger warnings.
+
+Workaround
+----------
+Explicitly cast the value to double.
+
+Rationale
+---------
+Changing to double allows sub-millisecond waits which was important for
+supporting changes to the HighResolutionTimer.
+
+
+Change
+------
+RealtimeOptions member workDurationMs was replaced by three optional member
+variables in RealtimeOptions, and all RealtimeOptions member variables were
+marked private.
+
+Possible Issues
+---------------
+Trying to construct a RealtimeOptions object with one or two values, or access
+any of its member variables, will no longer compile.
+
+Workaround
+----------
+Use the withMember functions to construct the object, and the getter functions
+to access the member variable values.
+
+Rationale
+---------
+The new approach improves the flexibility for users to specify realtime thread
+options on macOS/iOS and improves the flexibility for the API to evolve without
+introducing further breaking changes.
+
+
+Change
+------
 JUCE module compilation files with a platform suffix are now checked case
 insensitively for CMake builds.
 
