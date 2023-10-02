@@ -127,7 +127,7 @@ void OpenDocumentManager::removeListener (DocumentCloseListener* listener)
 bool OpenDocumentManager::canOpenFile (const File& file)
 {
     for (int i = types.size(); --i >= 0;)
-        if (types.getUnchecked(i)->canOpenFile (file))
+        if (types.getUnchecked (i)->canOpenFile (file))
             return true;
 
     return false;
@@ -136,16 +136,16 @@ bool OpenDocumentManager::canOpenFile (const File& file)
 OpenDocumentManager::Document* OpenDocumentManager::openFile (Project* project, const File& file)
 {
     for (int i = documents.size(); --i >= 0;)
-        if (documents.getUnchecked(i)->isForFile (file))
-            return documents.getUnchecked(i);
+        if (documents.getUnchecked (i)->isForFile (file))
+            return documents.getUnchecked (i);
 
     Document* d = nullptr;
 
     for (int i = types.size(); --i >= 0 && d == nullptr;)
     {
-        if (types.getUnchecked(i)->canOpenFile (file))
+        if (types.getUnchecked (i)->canOpenFile (file))
         {
-            d = types.getUnchecked(i)->openFile (project, file);
+            d = types.getUnchecked (i)->openFile (project, file);
             jassert (d != nullptr);
         }
     }
@@ -172,9 +172,7 @@ void OpenDocumentManager::saveIfNeededAndUserAgrees (OpenDocumentManager::Docume
 {
     if (! doc->needsSaving())
     {
-        if (callback != nullptr)
-            callback (FileBasedDocument::savedOk);
-
+        NullCheckedInvocation::invoke (callback, FileBasedDocument::savedOk);
         return;
     }
 
@@ -197,14 +195,12 @@ void OpenDocumentManager::saveIfNeededAndUserAgrees (OpenDocumentManager::Docume
                 if (parent == nullptr)
                     return;
 
-                if (callback != nullptr)
-                    callback (hasSaved ? FileBasedDocument::savedOk : FileBasedDocument::failedToWriteToFile);
+                NullCheckedInvocation::invoke (callback, hasSaved ? FileBasedDocument::savedOk : FileBasedDocument::failedToWriteToFile);
             });
             return;
         }
 
-        if (callback != nullptr)
-            callback (r == 2 ? FileBasedDocument::savedOk : FileBasedDocument::userCancelledSave);
+        NullCheckedInvocation::invoke (callback, r == 2 ? FileBasedDocument::savedOk : FileBasedDocument::userCancelledSave);
     });
 }
 
@@ -233,9 +229,7 @@ void OpenDocumentManager::closeDocumentAsync (Document* doc, SaveIfNeeded saveIf
 {
     if (! documents.contains (doc))
     {
-        if (callback != nullptr)
-            callback (true);
-
+        NullCheckedInvocation::invoke (callback, true);
         return;
     }
 
@@ -249,16 +243,13 @@ void OpenDocumentManager::closeDocumentAsync (Document* doc, SaveIfNeeded saveIf
 
             if (result != FileBasedDocument::savedOk)
             {
-                if (callback != nullptr)
-                    callback (false);
-
+                NullCheckedInvocation::invoke (callback, false);
                 return;
             }
 
             auto closed = parent->closeDocumentWithoutSaving (doc);
 
-            if (callback != nullptr)
-                callback (closed);
+            NullCheckedInvocation::invoke (callback, closed);
         });
 
         return;
@@ -266,8 +257,7 @@ void OpenDocumentManager::closeDocumentAsync (Document* doc, SaveIfNeeded saveIf
 
     auto closed = closeDocumentWithoutSaving (doc);
 
-    if (callback != nullptr)
-        callback (closed);
+    NullCheckedInvocation::invoke (callback, closed);
 }
 
 void OpenDocumentManager::closeFileWithoutSaving (const File& f)
@@ -286,9 +276,7 @@ static void closeLastAsyncRecusrsive (WeakReference<OpenDocumentManager> parent,
 
     if (lastIndex < 0)
     {
-        if (callback != nullptr)
-            callback (true);
-
+        NullCheckedInvocation::invoke (callback, true);
         return;
     }
 
@@ -301,9 +289,7 @@ static void closeLastAsyncRecusrsive (WeakReference<OpenDocumentManager> parent,
 
         if (! closedSuccessfully)
         {
-            if (callback != nullptr)
-                callback (false);
-
+            NullCheckedInvocation::invoke (callback, false);
             return;
         }
 
@@ -334,9 +320,7 @@ void OpenDocumentManager::closeLastDocumentUsingProjectRecursive (WeakReference<
 
                     if (! closedSuccessfully)
                     {
-                        if (callback != nullptr)
-                            callback (false);
-
+                        NullCheckedInvocation::invoke (callback, false);
                         return;
                     }
 
@@ -348,8 +332,7 @@ void OpenDocumentManager::closeLastDocumentUsingProjectRecursive (WeakReference<
         }
     }
 
-    if (callback != nullptr)
-        callback (true);
+    NullCheckedInvocation::invoke (callback, true);
 }
 
 void OpenDocumentManager::closeAllDocumentsUsingProjectAsync (Project& project, SaveIfNeeded askUserToSave, std::function<void (bool)> callback)
@@ -465,7 +448,7 @@ OpenDocumentManager::Document* RecentDocumentList::getNext()
 bool RecentDocumentList::contains (const File& f) const
 {
     for (int i = previousDocs.size(); --i >= 0;)
-        if (previousDocs.getUnchecked(i)->getFile() == f)
+        if (previousDocs.getUnchecked (i)->getFile() == f)
             return true;
 
     return false;
@@ -474,8 +457,8 @@ bool RecentDocumentList::contains (const File& f) const
 OpenDocumentManager::Document* RecentDocumentList::getClosestPreviousDocOtherThan (OpenDocumentManager::Document* oneToAvoid) const
 {
     for (int i = previousDocs.size(); --i >= 0;)
-        if (previousDocs.getUnchecked(i) != oneToAvoid)
-            return previousDocs.getUnchecked(i);
+        if (previousDocs.getUnchecked (i) != oneToAvoid)
+            return previousDocs.getUnchecked (i);
 
     return nullptr;
 }
@@ -529,7 +512,7 @@ static void saveDocList (const Array <OpenDocumentManager::Document*>& list, Xml
 {
     for (int i = 0; i < list.size(); ++i)
     {
-        const OpenDocumentManager::Document& doc = *list.getUnchecked(i);
+        const OpenDocumentManager::Document& doc = *list.getUnchecked (i);
 
         XmlElement* e = xml.createNewChildElement ("DOC");
 
