@@ -401,7 +401,7 @@ static tresult extractResult (const QueryInterfaceResult& userInterface,
 }
 
 //==============================================================================
-class JuceAudioProcessor   : public Vst::IUnitInfo
+class JuceAudioProcessor final : public Vst::IUnitInfo
 {
 public:
     explicit JuceAudioProcessor (AudioProcessor* source) noexcept
@@ -409,8 +409,6 @@ public:
     {
         setupParameters();
     }
-
-    virtual ~JuceAudioProcessor() = default;
 
     AudioProcessor* get() const noexcept      { return audioProcessor.get(); }
 
@@ -744,15 +742,15 @@ static void setValueAndNotifyIfChanged (AudioProcessorParameter& param, float ne
 }
 
 //==============================================================================
-class JuceVST3EditController : public Vst::EditController,
-                               public Vst::IMidiMapping,
-                               public Vst::IUnitInfo,
-                               public Vst::ChannelContext::IInfoListener,
-                              #if JucePlugin_Enable_ARA
-                               public Presonus::IPlugInViewEmbedding,
-                              #endif
-                               public AudioProcessorListener,
-                               private ComponentRestarter::Listener
+class JuceVST3EditController final : public Vst::EditController,
+                                     public Vst::IMidiMapping,
+                                     public Vst::IUnitInfo,
+                                     public Vst::ChannelContext::IInfoListener,
+                                    #if JucePlugin_Enable_ARA
+                                     public Presonus::IPlugInViewEmbedding,
+                                    #endif
+                                     public AudioProcessorListener,
+                                     private ComponentRestarter::Listener
 {
 public:
     explicit JuceVST3EditController (Vst::IHostApplication* host)
@@ -811,7 +809,7 @@ public:
     }
 
     //==============================================================================
-    struct Param  : public Vst::Parameter
+    struct Param final : public Vst::Parameter
     {
         Param (JuceVST3EditController& editController, AudioProcessorParameter& p,
                Vst::ParamID vstParamID, Vst::UnitID vstUnitID,
@@ -923,7 +921,7 @@ public:
     };
 
     //==============================================================================
-    struct ProgramChangeParameter  : public Vst::Parameter
+    struct ProgramChangeParameter final : public Vst::Parameter
     {
         ProgramChangeParameter (AudioProcessor& p, Vst::ParamID vstParamID)
             : owner (p)
@@ -1460,7 +1458,7 @@ private:
     }
 
     //==============================================================================
-    struct OwnedParameterListener  : public AudioProcessorParameter::Listener
+    struct OwnedParameterListener  final : public AudioProcessorParameter::Listener
     {
         OwnedParameterListener (JuceVST3EditController& editController,
                                 AudioProcessorParameter& parameter,
@@ -1637,7 +1635,7 @@ private:
         }
     }
 
-    class EditorContextMenu  : public HostProvidedContextMenu
+    class EditorContextMenu final : public HostProvidedContextMenu
     {
     public:
         EditorContextMenu (AudioProcessorEditor& editorIn,
@@ -1720,7 +1718,7 @@ private:
         VSTComSmartPtr<Steinberg::Vst::IContextMenu> contextMenu;
     };
 
-    class EditorHostContext  : public AudioProcessorEditorHostContext
+    class EditorHostContext final : public AudioProcessorEditorHostContext
     {
     public:
         EditorHostContext (JuceAudioProcessor& processorIn,
@@ -1752,9 +1750,9 @@ private:
     };
 
     //==============================================================================
-    class JuceVST3Editor  : public Vst::EditorView,
-                            public Steinberg::IPlugViewContentScaleSupport,
-                            private Timer
+    class JuceVST3Editor final : public Vst::EditorView,
+                                 public Steinberg::IPlugViewContentScaleSupport,
+                                 private Timer
     {
     public:
         JuceVST3Editor (JuceVST3EditController& ec, JuceAudioProcessor& p)
@@ -2089,10 +2087,10 @@ private:
         }
 
         //==============================================================================
-        struct ContentWrapperComponent  : public Component
-                                       #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
-                                        , public Timer
-                                       #endif
+        struct ContentWrapperComponent final : public Component
+                                            #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
+                                             , public Timer
+                                            #endif
         {
             ContentWrapperComponent (JuceVST3Editor& editor)  : owner (editor)
             {
@@ -2329,7 +2327,7 @@ private:
 
         // On macOS Cubase 10 resizes the host window after calling onSize() resulting in the peer
         // bounds being a step behind the plug-in. Calling updateBounds() asynchronously seems to fix things...
-        struct Cubase10WindowResizeWorkaround  : public AsyncUpdater
+        struct Cubase10WindowResizeWorkaround final : public AsyncUpdater
         {
             Cubase10WindowResizeWorkaround (JuceVST3Editor& o)  : owner (o) {}
 
@@ -2394,7 +2392,7 @@ private:
 
 //==============================================================================
 #if JucePlugin_Enable_ARA
- class JuceARAFactory : public ARA::IMainFactory
+ class JuceARAFactory final : public ARA::IMainFactory
  {
  public:
     JuceARAFactory() = default;
@@ -2438,16 +2436,16 @@ private:
 #endif
 
 //==============================================================================
-class JuceVST3Component : public Vst::IComponent,
-                          public Vst::IAudioProcessor,
-                          public Vst::IUnitInfo,
-                          public Vst::IConnectionPoint,
-                          public Vst::IProcessContextRequirements,
-                         #if JucePlugin_Enable_ARA
-                          public ARA::IPlugInEntryPoint,
-                          public ARA::IPlugInEntryPoint2,
-                         #endif
-                          public AudioPlayHead
+class JuceVST3Component final : public Vst::IComponent,
+                                public Vst::IAudioProcessor,
+                                public Vst::IUnitInfo,
+                                public Vst::IConnectionPoint,
+                                public Vst::IProcessContextRequirements,
+                               #if JucePlugin_Enable_ARA
+                                public ARA::IPlugInEntryPoint,
+                                public ARA::IPlugInEntryPoint2,
+                               #endif
+                                public AudioPlayHead
 {
 public:
     JuceVST3Component (Vst::IHostApplication* h)
@@ -3973,7 +3971,7 @@ bool shutdownModule()
 #endif
 
 // See https://steinbergmedia.github.io/vst3_dev_portal/pages/FAQ/Compatibility+with+VST+2.x+or+VST+1.html
-class JucePluginCompatibility : public IPluginCompatibility
+class JucePluginCompatibility final : public IPluginCompatibility
 {
 public:
     virtual ~JucePluginCompatibility() = default;
@@ -4043,7 +4041,7 @@ private:
 using CreateFunction = FUnknown* (*)(Vst::IHostApplication*);
 
 //==============================================================================
-struct JucePluginFactory  : public IPluginFactory3
+struct JucePluginFactory final : public IPluginFactory3
 {
     JucePluginFactory()
         : factoryInfo (JucePlugin_Manufacturer, JucePlugin_ManufacturerWebsite,
