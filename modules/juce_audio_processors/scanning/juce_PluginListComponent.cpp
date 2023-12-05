@@ -302,7 +302,7 @@ PopupMenu PluginListComponent::createOptionsMenu()
                                         {
                                             auto title = "Remove all " + format->getName() + " plugins?";
                                             auto message = "Are you sure you want to remove all " + format->getName() + " plugins?";
-                                            if (AlertWindow::showOkCancelBox (AlertWindow::QuestionIcon, title, message, TRANS("Yes"), TRANS("No")))
+                                            if (AlertWindow::showOkCancelBox (AlertWindow::QuestionIcon, title, message, TRANS("Yes"), TRANS("No"), nullptr, nullptr))
                                                 for (auto& pd : list.getTypesForFormat (*format))
                                                     list.removeType (pd);
                                         }));
