@@ -911,6 +911,7 @@ namespace juce
         TRACE_LOG_D2D_PAINT_CALL(etw::restoreState);
 
         currentState = getPimpl()->popSavedState();
+        currentState->updateColourBrush();
         jassert(currentState);
     }
 
