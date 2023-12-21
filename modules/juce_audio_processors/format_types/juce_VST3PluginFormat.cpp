@@ -2888,6 +2888,34 @@ public:
     }
 
     //==============================================================================
+    bool hasNameForMidiNoteNumber (int note, int /*midiChannel*/, juce::String& noteName) override
+    {
+        if (unitInfo != nullptr)
+        {
+            const int programListCount = unitInfo->getProgramListCount();
+
+            if (programListCount > 0)
+            {
+                Vst::ProgramListInfo programListInfo {};
+
+                if (unitInfo->getProgramListInfo (0, programListInfo) == kResultOk)
+                {
+                    if (unitInfo->hasProgramPitchNames (programListInfo.id, 0) == kResultTrue)
+                    {
+                        Vst::String128 name;
+                        if (unitInfo->getProgramPitchName (programListInfo.id, 0, (Steinberg::int16) note, name) == kResultTrue)
+                        {
+                            noteName = toString (name) ;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    //==============================================================================
     void updateTrackProperties (const TrackProperties& properties) override
     {
         if (trackInfoListener != nullptr)

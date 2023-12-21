@@ -1326,6 +1326,21 @@ struct VSTPluginInstance final   : public AudioPluginInstance,
 
     int pluginCanDo (const char* text) const  { return (int) dispatch (Vst2::effCanDo, 0, 0, (void*) text,  0); }
 
+    bool hasNameForMidiNoteNumber (int note, int midiChannel, juce::String& noteName) override
+    {
+        Vst2::MidiKeyName keyName;
+        memset (&keyName, 0, sizeof (keyName));
+        keyName.thisProgramIndex = getCurrentProgram();
+        keyName.thisKeyNumber = note;
+
+        if (dispatch (Vst2::effGetMidiKeyName, midiChannel, 0, &keyName, 0.0f))
+        {
+            noteName = String::createStringFromData (keyName.keyName, sizeof (keyName.keyName));
+            return true;
+        }
+        return false;
+    }
+
     //==============================================================================
     void prepareToPlay (double rate, int samplesPerBlockExpected) override
     {
@@ -2931,6 +2946,11 @@ public:
 
        #if JUCE_LINUX || JUCE_BSD
         MessageManager::callAsync ([safeThis = SafePointer<VSTPluginWindow> { this }]
+        {
+            if (safeThis != nullptr)
+                safeThis->componentMovedOrResized (true, true);
+        });
+        Timer::callAfterDelay (250, [safeThis = SafePointer<VSTPluginWindow> { this }]
         {
             if (safeThis != nullptr)
                 safeThis->componentMovedOrResized (true, true);

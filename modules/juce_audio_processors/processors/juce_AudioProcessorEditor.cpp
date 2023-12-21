@@ -169,7 +169,8 @@ void AudioProcessorEditor::editorResized (bool wasResized)
     // obliterate it! If you want to scale the whole of your UI use Desktop::setGlobalScaleFactor(),
     // or, for applying other transforms, consider putting the component you want to transform
     // in a child of the editor and transform that instead.
-    jassert (getTransform() == hostScaleTransform);
+    if (findParentComponentOfClass<AudioProcessorEditor>() == nullptr)
+        jassert (getTransform() == hostScaleTransform);
 
     if (wasResized)
     {
