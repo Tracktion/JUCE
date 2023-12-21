@@ -263,7 +263,7 @@ void AttributedString::draw (Graphics& g, const Rectangle<float>& area) const
     {
         jassert (text.length() == getLength (attributes));
 
-        if (! g.getInternalContext().drawTextLayout (*this, area))
+        if (! g.getInternalContext().drawTextLayout (*this, area.withHeight(std::numeric_limits<float>::max())))
         {
             TextLayout layout;
             layout.createLayout (*this, area.getWidth());
