@@ -160,7 +160,7 @@ public:
             ComSmartPtr<IDWriteFont> directWriteFont;
             auto hr = fontFamily->GetFont(0, directWriteFont.resetAndGetPointerAddress());
             if (FAILED(hr))
-        {
+            {
                 return;
             }
 

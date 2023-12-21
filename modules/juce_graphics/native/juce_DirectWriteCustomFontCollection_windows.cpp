@@ -52,7 +52,7 @@ private:
                                          UINT64       fragmentSize,
                                          void**       fragmentContext) noexcept override
         {
-            if (fileOffset + fragmentSize >= rawData.numBytes)
+            if (fileOffset + fragmentSize > rawData.numBytes)
             {
                 *fragmentStart   = nullptr;
                 *fragmentContext = nullptr;
@@ -97,9 +97,7 @@ private:
             *fontFileStream = nullptr;
             return E_INVALIDARG;
         }
-    };
-
-    FontFileLoader fontFileLoader;
+    } fontFileLoader;
 
     struct FontFileEnumerator : public ComBaseClassHelper<IDWriteFontFileEnumerator>
     {
