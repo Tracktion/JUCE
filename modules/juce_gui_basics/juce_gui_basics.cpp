@@ -140,6 +140,7 @@
 
 #if JUCE_MAC || JUCE_IOS
  #include "native/accessibility/juce_AccessibilitySharedCode_mac.mm"
+ #include "native/juce_CGMetalLayerRenderer_mac.h"
 
  #if JUCE_IOS
   #include "native/juce_UIViewComponentPeer_ios.mm"
