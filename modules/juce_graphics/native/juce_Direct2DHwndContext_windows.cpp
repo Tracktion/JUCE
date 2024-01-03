@@ -596,9 +596,9 @@ namespace juce
     };
 
     //==============================================================================
-    Direct2DHwndContext::Direct2DHwndContext(HWND hwnd_, float dpiScalingFactor_, bool opaque)
+    Direct2DHwndContext::Direct2DHwndContext(void* windowHandle, float dpiScalingFactor_, bool opaque)
     {
-        pimpl = std::make_unique<HwndPimpl>(*this, hwnd_, opaque);
+        pimpl = std::make_unique<HwndPimpl>(*this, reinterpret_cast<HWND>(windowHandle), opaque);
 
         getPimpl()->setScaleFactor(dpiScalingFactor_);
         updateSize();
@@ -606,7 +606,7 @@ namespace juce
 
     Direct2DHwndContext::~Direct2DHwndContext() {}
 
-    HWND Direct2DHwndContext::getHwnd() const noexcept
+    void* Direct2DHwndContext::getHwnd() const noexcept
     {
         return pimpl->getHwnd();
     }

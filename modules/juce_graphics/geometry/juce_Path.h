@@ -791,12 +791,29 @@ public:
     */
     void restoreFromString (StringRef stringVersion);
 
-    uint64 getUniqueID() const noexcept { return uniqueID; }
-    auto getModificationCount() const noexcept { return modificationCount; }
+    //==============================================================================
+    /** Direct2D path caching
+    *
+    */
 
-    mutable StatisticsAccumulator<double> geometryCreationTime;
-    mutable StatisticsAccumulator<double> filledGeometryRealizationCreationTime;
-    mutable StatisticsAccumulator<double> strokedGeometryRealizationCreationTime;
+    uint64 getUniqueID() const noexcept { return uniqueID; }
+    auto getModificationCount() const noexcept { return cacheInfo.modificationCount; }
+
+    void setCacheEnabled(bool enabled) { cacheInfo.cacheEnabled = enabled; }
+    bool isCacheEnabled() const noexcept { return cacheInfo.cacheEnabled; }
+    bool shouldBeCached() const noexcept
+    {
+        //
+        // Only try to cache this path if this specific object is painted repeatedly
+        //
+        if (cacheInfo.cacheableCountdown > 0)
+        {
+            --cacheInfo.cacheableCountdown;
+            return false;
+        }
+
+        return isCacheEnabled();
+    }
 
 private:
     //==============================================================================
@@ -827,14 +844,25 @@ private:
     PathBounds bounds;
     bool useNonZeroWinding = true;
 
-    int modificationCount = 0;
-    uint64 const uniqueID = (uint64) Time::getHighResolutionTicks() ^ reinterpret_cast<size_t> (this);
+    struct CacheInfo
+    {
+        bool cacheEnabled = true;
+        mutable int cacheableCountdown = 2;
+        int modificationCount = 0;
+    } cacheInfo;
+
+    uint64 uniqueID = createUniqueID();
 
     static constexpr float lineMarker           = 100001.0f;
     static constexpr float moveMarker           = 100002.0f;
     static constexpr float quadMarker           = 100003.0f;
     static constexpr float cubicMarker          = 100004.0f;
     static constexpr float closeSubPathMarker   = 100005.0f;
+
+    uint64 createUniqueID()
+    {
+        return (uint64)Time::getHighResolutionTicks() ^ reinterpret_cast<size_t> (this);
+    }
 
     JUCE_LEAK_DETECTOR (Path)
 };

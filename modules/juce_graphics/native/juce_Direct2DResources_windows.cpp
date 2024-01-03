@@ -176,6 +176,8 @@ namespace juce
         protected:
             ComSmartPtr<ID2D1Bitmap1> bitmap;
         };
+
+
         //==============================================================================
         //
         // Geometry caching
@@ -184,33 +186,163 @@ namespace juce
         class GeometryCache
         {
         public:
-            ~GeometryCache()
+            virtual ~GeometryCache()
             {
                 release();
             }
 
             void release()
             {
-                filledGeometryCache.clear();
-                strokedGeometryCache.clear();
+                hashMap.clear();
             }
 
-            ID2D1GeometryRealization* getFilledGeometryRealisation(const Path& path,
+#if JUCE_DIRECT2D_METRICS
+            StatisticsAccumulator<double>* createGeometryMsecStats = nullptr;
+            StatisticsAccumulator<double>* createGeometryRealisationMsecStats = nullptr;
+#endif
+
+        protected:
+
+            static float findGeometryFlatteningTolerance(float scaleFactor)
+            {
+                //
+                // Could use D2D1::ComputeFlatteningTolerance here, but that requires defining NTDDI_VERSION and it doesn't do anything special.
+                //
+                // Direct2D default flattening tolerance is 0.25
+                //
+                return 0.25f / scaleFactor;
+            }
+
+            //==============================================================================
+            //
+            // Hashing
+            //
+            static constexpr auto fnvOffsetBasis = 0xcbf29ce484222325;
+            static constexpr auto fnvPrime = 0x100000001b3;
+
+            static constexpr uint64 fnv1aHash(uint8 const* data, size_t numBytes, uint64 hash = fnvOffsetBasis)
+            {
+                while (numBytes > 0)
+                {
+                    hash = (hash ^ *data++) * fnvPrime;
+                    --numBytes;
+                }
+
+                return hash;
+            }
+
+            //==============================================================================
+            //
+            // Caching
+            //
+            struct CachedGeometryRealisation : public ReferenceCountedObject
+            {
+                CachedGeometryRealisation(uint64 hash_) :
+                    hash(hash_)
+                {
+                }
+
+                CachedGeometryRealisation(CachedGeometryRealisation const& other) :
+                    hash(other.hash),
+                    pathModificationCount(other.pathModificationCount),
+                    geometryRealisation(other.geometryRealisation)
+                {
+                }
+
+                CachedGeometryRealisation(CachedGeometryRealisation&& other)  noexcept :
+                    hash(other.hash),
+                    pathModificationCount(other.pathModificationCount),
+                    geometryRealisation(other.geometryRealisation)
+                {
+                }
+
+                ~CachedGeometryRealisation()
+                {
+                    clear();
+                }
+
+                void clear()
+                {
+                    hash = 0;
+                    geometryRealisation = nullptr;
+                }
+
+                uint64 hash = 0;
+                int pathModificationCount = 0;
+                ComSmartPtr<ID2D1GeometryRealization> geometryRealisation;
+
+                using Ptr = ReferenceCountedObjectPtr<CachedGeometryRealisation>;
+            };
+
+            class HashMap
+            {
+            public:
+                ~HashMap()
+                {
+                    clear();
+                }
+
+                void clear()
+                {
+                    lruCache.clear();
+                }
+
+                auto size() const noexcept
+                {
+                    return lruCache.size();
+                }
+
+                CachedGeometryRealisation::Ptr getCachedGeometryRealisation(uint64 hash)
+                {
+                    trim();
+
+                    if (auto entry = lruCache.get(hash))
+                    {
+                        return entry;
+                    }
+
+                    CachedGeometryRealisation::Ptr cachedGeometryRealisation = new CachedGeometryRealisation{ hash };
+                    lruCache.set(hash, cachedGeometryRealisation);
+                    return cachedGeometryRealisation;
+                }
+
+                void trim()
+                {
+                    //
+                    // Remove any expired entries
+                    //
+                    while (lruCache.size() > maxNumCacheEntries)
+                    {
+                        lruCache.popBack();
+                    }
+                }
+
+            private:
+                static int constexpr maxNumCacheEntries = 128;
+
+                direct2d::LeastRecentlyUsedCache<uint64, CachedGeometryRealisation::Ptr> lruCache;
+            } hashMap;
+        };
+
+        class FilledGeometryCache : public GeometryCache
+        {
+        public:
+            ~FilledGeometryCache() override = default;
+
+            ID2D1GeometryRealization* getGeometryRealisation(const Path& path,
                 ID2D1Factory2* factory,
                 ID2D1DeviceContext1* deviceContext,
-                float dpiScaleFactor,
-                int64& geometryCreationTicks,
-                int64& geometryRealisationCreationTicks)
+                float dpiScaleFactor)
             {
-                if (path.getModificationCount() == 0)
+                if (path.getModificationCount() == 0 || !path.isCacheEnabled() || !path.shouldBeCached())
                 {
                     return nullptr;
                 }
 
                 auto flatteningTolerance = findGeometryFlatteningTolerance(dpiScaleFactor);
-                auto hash = calculateHash(path, flatteningTolerance);
+                auto hash = calculatePathHash(path, flatteningTolerance);
 
-                if (auto cachedGeometry = filledGeometryCache.getCachedGeometryRealisation(hash))
+                if (auto cachedGeometry = hashMap.getCachedGeometryRealisation(hash))
                 {
                     if (cachedGeometry->geometryRealisation && cachedGeometry->pathModificationCount != path.getModificationCount())
                     {
@@ -220,18 +352,23 @@ namespace juce
 
                     if (!cachedGeometry->geometryRealisation)
                     {
+#if JUCE_DIRECT2D_METRICS
                         auto t1 = Time::getHighResolutionTicks();
-
-                        if (auto geometry = direct2d::pathToPathGeometry(factory, path))
+#endif
+                        if (auto geometry = direct2d::pathToPathGeometry(factory, path, D2D1_FIGURE_BEGIN_FILLED))
                         {
+#if JUCE_DIRECT2D_METRICS
                             auto t2 = Time::getHighResolutionTicks();
+#endif
 
                             auto hr = deviceContext->CreateFilledGeometryRealization(geometry, flatteningTolerance, cachedGeometry->geometryRealisation.resetAndGetPointerAddress());
 
+#if JUCE_DIRECT2D_METRICS
                             auto t3 = Time::getHighResolutionTicks();
 
-                            geometryCreationTicks = t2 - t1;
-                            geometryRealisationCreationTicks = t3 - t2;
+                            if (createGeometryMsecStats) createGeometryMsecStats->addValue(Time::highResolutionTicksToSeconds(t2 - t1) * 1000.0);
+                            if (createGeometryRealisationMsecStats) createGeometryRealisationMsecStats->addValue(Time::highResolutionTicksToSeconds(t3 - t2) * 1000.0);
+#endif
 
                             switch (hr)
                             {
@@ -251,23 +388,41 @@ namespace juce
                 return nullptr;
             }
 
-            ID2D1GeometryRealization* getStrokedGeometryRealisation(const Path& path,
+        private:
+
+            //==============================================================================
+            //
+            // Hashing
+            //
+
+            uint64 calculatePathHash(Path const& path, float flatteningTolerance)
+            {
+                return fnv1aHash(reinterpret_cast<uint8 const*>(&flatteningTolerance), sizeof(flatteningTolerance), path.getUniqueID());
+            }
+
+        };
+
+        class StrokeGeometryCache : public GeometryCache
+        {
+        public:
+            ~StrokeGeometryCache() override = default;
+
+            ID2D1GeometryRealization* getGeometryRealisation(const Path& path,
                 const PathStrokeType& strokeType,
                 ID2D1Factory2* factory,
                 ID2D1DeviceContext1* deviceContext,
-                float dpiScaleFactor,
-                int64& geometryCreationTicks,
-                int64& geometryRealisationCreationTicks)
+                float transformScaleFactor,
+                float dpiScaleFactor)
             {
-                if (path.getModificationCount() == 0)
+                if (path.getModificationCount() == 0 || !path.isCacheEnabled() || !path.shouldBeCached())
                 {
                     return nullptr;
                 }
 
-                auto flatteningTolerance = findGeometryFlatteningTolerance(dpiScaleFactor);
-                auto hash = calculateHash(path, strokeType, flatteningTolerance);
+                auto flatteningTolerance = findGeometryFlatteningTolerance(dpiScaleFactor * transformScaleFactor);
+                auto hash = calculatePathHash(path, strokeType, flatteningTolerance, transformScaleFactor);
 
-                if (auto cachedGeometry = strokedGeometryCache.getCachedGeometryRealisation(hash))
+                if (auto cachedGeometry = hashMap.getCachedGeometryRealisation(hash))
                 {
                     if (cachedGeometry->geometryRealisation && cachedGeometry->pathModificationCount != path.getModificationCount())
                     {
@@ -277,21 +432,33 @@ namespace juce
 
                     if (!cachedGeometry->geometryRealisation)
                     {
+#if JUCE_DIRECT2D_METRICS
                         auto t1 = Time::getHighResolutionTicks();
-
-                        if (auto geometry = direct2d::pathToPathGeometry(factory, path))
+#endif
+                        if (auto geometry = direct2d::pathToPathGeometry(factory, path, D2D1_FIGURE_BEGIN_HOLLOW))
                         {
+#if JUCE_DIRECT2D_METRICS
                             auto t2 = Time::getHighResolutionTicks();
+#endif
                             if (auto strokeStyle = direct2d::pathStrokeTypeToStrokeStyle(factory, strokeType))
                             {
-                                auto hr = deviceContext->CreateStrokedGeometryRealization(geometry, flatteningTolerance,
-                                    strokeType.getStrokeThickness(), strokeStyle,
+                                //
+                                // For stroked paths, the transform will affect the thickness of the path as well
+                                // as the dimensions of the path. Divide the stroke thickness by the scale factor
+                                // of the transform to compensate
+                                //
+                                auto hr = deviceContext->CreateStrokedGeometryRealization(geometry,
+                                    flatteningTolerance,
+                                    strokeType.getStrokeThickness() / transformScaleFactor,
+                                    strokeStyle,
                                     cachedGeometry->geometryRealisation.resetAndGetPointerAddress());
 
+#if JUCE_DIRECT2D_METRICS
                                 auto t3 = Time::getHighResolutionTicks();
 
-                                geometryCreationTicks = t2 - t1;
-                                geometryRealisationCreationTicks = t3 - t2;
+                                if (createGeometryMsecStats) createGeometryMsecStats->addValue(Time::highResolutionTicksToSeconds(t2 - t1) * 1000.0);
+                                if (createGeometryRealisationMsecStats) createGeometryRealisationMsecStats->addValue(Time::highResolutionTicksToSeconds(t3 - t2) * 1000.0);
+#endif
 
                                 switch (hr)
                                 {
@@ -314,55 +481,15 @@ namespace juce
 
         private:
 
-            static float findGeometryFlatteningTolerance(float dpiScaleFactor, /*const AffineTransform& transform,*/ float maxZoomFactor = 1.0f)
-            {
-                jassert(maxZoomFactor > 0.0f);
-
-                //
-                // Could use D2D1::ComputeFlatteningTolerance here, but that requires defining NTDDI_VERSION and it doesn't do anything special.
-                //
-                // Direct2D default flattening tolerance is 0.25
-                //
-                //auto transformScaleFactor = std::sqrt(std::abs(transform.getDeterminant()));
-                return 0.25f / (/*transformScaleFactor **/ dpiScaleFactor * maxZoomFactor);
-            }
-
-            //==============================================================================
-            //
-            // Hashing
-            //
-            static constexpr auto fnvOffsetBasis = 0xcbf29ce484222325;
-            static constexpr auto fnvPrime = 0x100000001b3;
-
-            static constexpr uint64 fnv1aHash(uint8 const* data, size_t numBytes, uint64 hash = fnvOffsetBasis)
-            {
-                while (numBytes > 0)
-                {
-                    hash = (hash ^ *data++) * fnvPrime;
-                    --numBytes;
-                }
-
-                return hash;
-            }
-
-            static uint64 fnv1aHash(float value, uint64 hash = fnvOffsetBasis)
-            {
-                return fnv1aHash(reinterpret_cast<uint8 const*>(&value), sizeof(float), hash);
-            }
-
-            uint64 calculateHash(Path const& path, float flatteningTolerance)
-            {
-                return fnv1aHash(flatteningTolerance, path.getUniqueID());
-            }
-
-            uint64 calculateHash(Path const& path, PathStrokeType const& strokeType, float flatteningTolerance)
+            uint64 calculatePathHash(Path const& path, PathStrokeType const& strokeType, float flatteningTolerance, float transformScaleFactor)
             {
                 struct
                 {
-                    float flatteningTolerance, strokeThickness;
+                    float transformScaleFactor, flatteningTolerance, strokeThickness;
                     int8 jointStyle, endStyle;
                 } extraHashData;
 
+                extraHashData.transformScaleFactor = transformScaleFactor;
                 extraHashData.flatteningTolerance = flatteningTolerance;
                 extraHashData.strokeThickness = strokeType.getStrokeThickness();
                 extraHashData.jointStyle = (int8)strokeType.getJointStyle();
@@ -370,142 +497,6 @@ namespace juce
 
                 return fnv1aHash(reinterpret_cast<uint8 const*>(&extraHashData), sizeof(extraHashData), path.getUniqueID());
             }
-
-
-            //==============================================================================
-            //
-            // Caching
-            //
-            struct CachedGeometryRealisation : public ReferenceCountedObject
-            {
-                CachedGeometryRealisation(uint64 hash_) :
-                    hash(hash_)
-                {
-                }
-
-                CachedGeometryRealisation(CachedGeometryRealisation& other) :
-                    timestamp(other.timestamp),
-                    hash(other.hash),
-                    pathModificationCount(other.pathModificationCount),
-                    geometryRealisation(other.geometryRealisation)
-                {
-                }
-
-                CachedGeometryRealisation(CachedGeometryRealisation&& other)  noexcept :
-                    timestamp(other.timestamp),
-                    hash(other.hash),
-                    pathModificationCount(other.pathModificationCount),
-                    geometryRealisation(other.geometryRealisation)
-                {
-                }
-
-                ~CachedGeometryRealisation()
-                {
-                    clear();
-                }
-
-                void clear()
-                {
-                    hash = 0;
-                    geometryRealisation = nullptr;
-                }
-
-                int64 timestamp = Time::getHighResolutionTicks();
-                uint64 hash;
-                int pathModificationCount = 0;
-                ComSmartPtr<ID2D1GeometryRealization> geometryRealisation;
-
-                using Ptr = ReferenceCountedObjectPtr<CachedGeometryRealisation>;
-
-                JUCE_DECLARE_WEAK_REFERENCEABLE(CachedGeometryRealisation)
-            };
-
-            static constexpr int maxCacheSize = 100;
-
-            class Cache
-            {
-            public:
-                ~Cache()
-                {
-                    timeline.clear();
-                    clear();
-                }
-
-                void clear()
-                {
-                    cacheMap.clear();
-                }
-
-                CachedGeometryRealisation* getCachedGeometryRealisation(uint64 hash)
-                {
-                    removeStaleEntries();
-
-                    auto& cacheEntry = cacheMap[hash];
-                    if (cacheEntry != nullptr)
-                    {
-                        //
-                        // Cache hit - sort the timeline in reverse order
-                        //
-                        cacheEntry->timestamp = Time::getHighResolutionTicks();
-
-                        struct TimestampComparator
-                        {
-                            static int compareElements(CachedGeometryRealisation* const first, CachedGeometryRealisation* const second)
-                            {
-                                if (first && second)
-                                {
-                                    auto delta = second->timestamp - first->timestamp;
-                                    return (int)(delta >> 32);
-                                }
-
-                                return 0;
-                            }
-                        } comparator;
-
-                        timeline.sort(comparator);
-
-                        return cacheEntry.get();
-                    }
-
-                    //
-                    // Cache miss - make a new entry, but don't populate it until
-                    // this hash code is reused
-                    //
-                    auto cachedGeometryRealisation = new CachedGeometryRealisation(hash);
-                    timeline.insert(0, cachedGeometryRealisation);
-                    cacheMap[hash] = cachedGeometryRealisation;
-                    return nullptr;
-                }
-
-                void removeStaleEntries()
-                {
-                    //
-                    // Remove any expired entries
-                    //
-                    auto now = Time::getHighResolutionTicks();
-                    auto const maximumAgeTicks = Time::secondsToHighResolutionTicks(0.2);
-                    while (timeline.size())
-                    {
-                        if (auto entry = timeline.getLast())
-                        {
-                            jassert(entry->hash && entry->timestamp);
-                            auto age = now - entry->timestamp;
-                            if (age < maximumAgeTicks)
-                            {
-                                break;
-                            }
-
-                            cacheMap.erase(entry->hash);
-                        }
-
-                        timeline.removeLast();
-                    }
-                }
-
-            private:
-                juce::ReferenceCountedArray<CachedGeometryRealisation> timeline;
-                std::unordered_map<uint64, CachedGeometryRealisation::Ptr> cacheMap;
-            } filledGeometryCache, strokedGeometryCache;
         };
 
 
@@ -563,7 +554,8 @@ namespace juce
 
             void release()
             {
-                geometryCache.release();
+                filledGeometryCache.release();
+                strokedGeometryCache.release();
                 colourBrush = nullptr;
                 deviceContext.release();
             }
@@ -575,7 +567,8 @@ namespace juce
 
             DeviceContext                     deviceContext;
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
-            GeometryCache                     geometryCache;
+            FilledGeometryCache               filledGeometryCache;
+            StrokeGeometryCache               strokedGeometryCache;
         };
 
         //==============================================================================

@@ -1051,12 +1051,14 @@ public:
 
     ImagePixelData::Ptr clone() override
     {
-        auto im = new WindowsBitmapImage (pixelFormat, width, height, false);
+       Image newImage{ SoftwareImageType{}.create(pixelFormat, width, height, pixelFormat != Image::RGB) };
 
-        for (int i = 0; i < height; ++i)
-            memcpy (im->imageData + i * lineStride, imageData + i * lineStride, (size_t) lineStride);
+        {
+            Graphics g(newImage);
+            g.drawImageAt(Image{ *this }, 0, 0);
+        }
 
-        return im;
+        return newImage.getPixelData();
     }
 
     void blitToWindow (HWND hwnd, HDC dc, bool transparent, int x, int y, uint8 layeredWindowAlpha) noexcept

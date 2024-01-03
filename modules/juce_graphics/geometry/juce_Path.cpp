@@ -103,7 +103,8 @@ Path::Path (const Path& other)
     : data (other.data),
       bounds (other.bounds),
       useNonZeroWinding (other.useNonZeroWinding),
-      modificationCount (other.modificationCount)
+      cacheInfo(other.cacheInfo),
+      uniqueID(createUniqueID())
 {
 }
 
@@ -114,7 +115,8 @@ Path& Path::operator= (const Path& other)
         data = other.data;
         bounds = other.bounds;
         useNonZeroWinding = other.useNonZeroWinding;
-        modificationCount = other.modificationCount;
+        cacheInfo = other.cacheInfo;
+        uniqueID = createUniqueID();
     }
 
     return *this;
@@ -124,7 +126,8 @@ Path::Path (Path&& other) noexcept
     : data (std::move (other.data)),
       bounds (other.bounds),
       useNonZeroWinding (other.useNonZeroWinding),
-      modificationCount (other.modificationCount)
+      cacheInfo(other.cacheInfo),
+      uniqueID(other.uniqueID)
 {
 }
 
@@ -133,7 +136,8 @@ Path& Path::operator= (Path&& other) noexcept
     data = std::move (other.data);
     bounds = other.bounds;
     useNonZeroWinding = other.useNonZeroWinding;
-    modificationCount = other.modificationCount;
+    cacheInfo = other.cacheInfo;
+    uniqueID = other.uniqueID;
     return *this;
 }
 
@@ -144,7 +148,7 @@ void Path::clear() noexcept
 {
     data.clearQuick();
     bounds.reset();
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::swapWithPath (Path& other) noexcept
@@ -155,20 +159,20 @@ void Path::swapWithPath (Path& other) noexcept
     std::swap (bounds.pathYMin, other.bounds.pathYMin);
     std::swap (bounds.pathYMax, other.bounds.pathYMax);
     std::swap (useNonZeroWinding, other.useNonZeroWinding);
-    std::swap (modificationCount, other.modificationCount);
+    std::swap (cacheInfo, other.cacheInfo);
 }
 
 //==============================================================================
 void Path::setUsingNonZeroWinding (const bool isNonZero) noexcept
 {
     useNonZeroWinding = isNonZero;
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::scaleToFit (float x, float y, float w, float h, bool preserveProportions) noexcept
 {
     applyTransform (getTransformToScaleToFit (x, y, w, h, preserveProportions));
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 //==============================================================================
@@ -219,7 +223,7 @@ void Path::startNewSubPath (const float x, const float y)
         bounds.extend (x, y);
 
     data.add (moveMarker, x, y);
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::startNewSubPath (Point<float> start)
@@ -236,7 +240,7 @@ void Path::lineTo (const float x, const float y)
 
     data.add (lineMarker, x, y);
     bounds.extend (x, y);
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::lineTo (Point<float> end)
@@ -255,7 +259,7 @@ void Path::quadraticTo (const float x1, const float y1,
 
     data.add (quadMarker, x1, y1, x2, y2);
     bounds.extend (x1, y1, x2, y2);
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::quadraticTo (Point<float> controlPoint, Point<float> endPoint)
@@ -277,7 +281,7 @@ void Path::cubicTo (const float x1, const float y1,
 
     data.add (cubicMarker, x1, y1, x2, y2, x3, y3);
     bounds.extend (x1, y1, x2, y2, x3, y3);
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::cubicTo (Point<float> controlPoint1,
@@ -294,7 +298,7 @@ void Path::closeSubPath()
     if (! (data.isEmpty() || isMarker (data.getLast(), closeSubPathMarker)))
     {
         data.add (closeSubPathMarker);
-        ++modificationCount;
+        ++cacheInfo.modificationCount;
     }
 }
 
@@ -351,7 +355,7 @@ void Path::addRectangle (float x, float y, float w, float h)
               lineMarker, x2, y2,
               closeSubPathMarker);
 
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 void Path::addRoundedRectangle (float x, float y, float w, float h, float csx, float csy)
@@ -879,7 +883,7 @@ void Path::applyTransform (const AffineTransform& transform) noexcept
         }
     }
 
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 }
 
 
@@ -1235,7 +1239,7 @@ Path Path::createPathWithRoundedCorners (const float cornerRadius) const
 //==============================================================================
 void Path::loadPathFromStream (InputStream& source)
 {
-    ++modificationCount;
+    ++cacheInfo.modificationCount;
 
     while (! source.isExhausted())
     {

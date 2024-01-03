@@ -19,13 +19,13 @@
 namespace juce
 {
 
-    class Direct2ImageContext : public Direct2DGraphicsContext
+    class Direct2DImageContext : public Direct2DGraphicsContext
     {
     public:
         /** Creates a context to render into an image. */
-        Direct2ImageContext(DirectX::DXGI::Adapter::Ptr adapter_, bool clearImage_);
+        Direct2DImageContext(DirectX::DXGI::Adapter::Ptr adapter_);
 
-        ~Direct2ImageContext() override;
+        ~Direct2DImageContext() override;
 
         void startFrame(ID2D1Bitmap1* bitmap, float dpiScaleFactor);
 
@@ -33,12 +33,10 @@ namespace juce
         struct ImagePimpl;
         std::unique_ptr<ImagePimpl> pimpl;
 
-        bool clearImage = true;
-
         Pimpl* getPimpl() const noexcept override;
         void clearTargetBuffer() override;
 
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Direct2ImageContext)
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Direct2DImageContext)
     };
 
 } // namespace juce

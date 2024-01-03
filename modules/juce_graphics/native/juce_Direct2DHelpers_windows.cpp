@@ -74,7 +74,7 @@ static D2D1_COLOR_F colourToD2D (Colour c)
 //
 // Convert a JUCE Path to a D2D Geometry
 //
-static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
+static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform, D2D1_FIGURE_BEGIN figureMode)
 {
     //
     // Every call to BeginFigure must have a matching call to EndFigure. But - the Path does not necessarily
@@ -137,7 +137,7 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
                 }
 
                 transform.transformPoint (it.x1, it.y1);
-                sink->BeginFigure ({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
+                sink->BeginFigure ({ it.x1, it.y1 }, figureMode);
 
                 figureStarted = true;
                 break;
@@ -151,7 +151,7 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
     }
 }
 
-static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink)
+static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink, D2D1_FIGURE_BEGIN figureMode)
 {
     Path::Iterator it(path);
     bool           figureStarted = false;
@@ -197,7 +197,7 @@ static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink)
             {
                 sink->EndFigure(D2D1_FIGURE_END_OPEN);
             }
-            sink->BeginFigure({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
+            sink->BeginFigure({ it.x1, it.y1 }, figureMode);
             figureStarted = true;
             break;
         }
@@ -208,7 +208,6 @@ static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink)
     {
         sink->EndFigure(D2D1_FIGURE_END_OPEN);
     }
-
 }
 
 static D2D1::Matrix3x2F transformToMatrix (const AffineTransform& transform)
@@ -224,9 +223,9 @@ static D2D1_POINT_2F pointTransformed (int x, int y, const AffineTransform& tran
     return { (FLOAT) xf, (FLOAT) yf };
 }
 
-static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform)
+static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform, D2D1_FIGURE_BEGIN figureMode)
 {
-    sink->BeginFigure (pointTransformed (rect.getX(), rect.getY(), transform), D2D1_FIGURE_BEGIN_FILLED);
+    sink->BeginFigure (pointTransformed (rect.getX(), rect.getY(), transform), figureMode);
     sink->AddLine (pointTransformed (rect.getRight(), rect.getY(), transform));
     sink->AddLine (pointTransformed (rect.getRight(), rect.getBottom(), transform));
     sink->AddLine (pointTransformed (rect.getX(), rect.getBottom(), transform));
@@ -270,14 +269,15 @@ struct ScopedGeometryWithSink
 static ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (ID2D1Factory* factory,
                                                           const RectangleList<int>& clipRegion,
                                                           const AffineTransform& transform,
-                                                          D2D1_FILL_MODE fillMode)
+                                                          D2D1_FILL_MODE fillMode,
+                                                          D2D1_FIGURE_BEGIN figureMode)
 {
     ScopedGeometryWithSink objects { factory, fillMode };
 
     if (objects.sink != nullptr)
     {
         for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-            direct2d::rectToGeometrySink (clipRegion.getRectangle (i), objects.sink, transform);
+            direct2d::rectToGeometrySink (clipRegion.getRectangle (i), objects.sink, transform, figureMode);
 
         return { (ID2D1Geometry*) objects.geometry };
     }
@@ -285,13 +285,13 @@ static ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (ID2D1Factory* factory,
     return nullptr;
 }
 
-static ComSmartPtr<ID2D1Geometry> pathToPathGeometry (ID2D1Factory* factory, const Path& path, const AffineTransform& transform)
+static ComSmartPtr<ID2D1Geometry> pathToPathGeometry(ID2D1Factory* factory, const Path& path, const AffineTransform& transform, D2D1_FIGURE_BEGIN figureMode)
 {
     ScopedGeometryWithSink objects { factory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
 
     if (objects.sink != nullptr)
     {
-        direct2d::pathToGeometrySink (path, objects.sink, transform);
+        direct2d::pathToGeometrySink (path, objects.sink, transform, figureMode);
 
         return { (ID2D1Geometry*) objects.geometry };
     }
@@ -299,13 +299,13 @@ static ComSmartPtr<ID2D1Geometry> pathToPathGeometry (ID2D1Factory* factory, con
     return nullptr;
 }
 
-static ComSmartPtr<ID2D1Geometry> pathToPathGeometry(ID2D1Factory* factory, const Path& path)
+static ComSmartPtr<ID2D1Geometry> pathToPathGeometry(ID2D1Factory* factory, const Path& path, D2D1_FIGURE_BEGIN figureMode)
 {
     ScopedGeometryWithSink objects{ factory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
 
     if (objects.sink != nullptr)
     {
-        direct2d::pathToGeometrySink(path, objects.sink);
+        direct2d::pathToGeometrySink(path, objects.sink, figureMode);
 
         return { (ID2D1Geometry*)objects.geometry };
     }
@@ -586,6 +586,200 @@ private:
 
     std::unique_ptr<std::remove_pointer_t<HANDLE>, Destructor> handle;
 };
+
+//==============================================================================
+//
+// LRU cache for geometry caching
+//
+
+template <typename KeyType, typename ValueType>
+class LeastRecentlyUsedCache
+{
+public:
+    void clear()
+    {
+        list.clear();
+        map.clear();
+    }
+
+    bool contains(KeyType const& key)
+    {
+        return map.find(key) != map.end();
+    }
+
+    void set(KeyType const& key, ValueType const& value)
+    {
+        //
+        // Replace existing entry
+        //
+        if (auto iterator = map.find(key); iterator != map.end())
+        {
+            iterator->second->second = value;
+            return;
+        }
+
+        //
+        // Add a new entry at the front of the LRU list
+        //
+        list.emplace_front(std::pair{ key, value });
+        map.emplace(key, list.begin());
+    }
+
+    void set (KeyType const& key, ValueType&& value)
+    {
+        //
+        // Replace existing entry
+        //
+        if (auto iterator = map.find(key); iterator != map.end())
+        {
+            iterator->second->second = value;
+            return;
+        }
+
+        //
+        // Add a new entry at the front of the LRU list
+        //
+        list.emplace_front(std::pair{ key, value });
+        map.emplace(key, list.begin());
+    }
+
+    ValueType get (KeyType const& key)
+    {
+        if (auto iterator = map.find(key); iterator != map.end())
+        {
+            //
+            // Found a match; move the key to the front of LRU list
+            //
+            list.splice(list.begin(), list, iterator->second);
+            return iterator->second->second;
+        }
+
+        return {};
+    }
+
+    void erase (KeyType const& key)
+    {
+        if (auto iterator = map.find(key); iterator != map.end())
+        {
+            //
+            // Remove the entry from the LRU list
+            //
+            list.erase(iterator->second);
+            map.erase(iterator);
+        }
+    }
+
+    ValueType back() const
+    {
+        if (list.empty())
+        {
+            return {};
+        }
+
+        return list.back().second;
+    }
+
+    void popBack()
+    {
+        if (list.empty())
+        {
+            return;
+        }
+
+        map.erase(list.back().first);
+        list.pop_back();
+    }
+
+    auto size() const noexcept
+    {
+        jassert(map.size() == list.size());
+        return map.size();
+    }
+
+private:
+    using ListType = std::list<std::pair<KeyType, ValueType>>;
+    ListType list;
+    std::unordered_map<KeyType, typename ListType::iterator> map;
+};
+
+#if JUCE_UNIT_TESTS
+
+class LeastRecentlyUsedCacheTests final : public UnitTest
+{
+public:
+    LeastRecentlyUsedCacheTests()
+        : UnitTest("LeastRecentlyUsedCache", UnitTestCategories::containers)
+    {}
+
+    void runTest() override
+    {
+        beginTest("LeastRecentlyUsedCache");
+
+        {
+            LeastRecentlyUsedCache<int, String> cache;
+            int numTestStrings = 100;
+            std::vector<int> hashes;
+            for (int i = 0; i < numTestStrings; ++i)
+            {
+                String testString = "String " + String{ i };
+                auto hash = testString.hashCode();
+                hashes.emplace_back(hash);
+                cache.set(hash, testString);
+            }
+
+            for (int i = 0; i < 1000; ++i)
+            {
+                auto hashIndex = getRandom().nextInt((int)hashes.size());
+                auto hash = hashes[static_cast<size_t>(hashIndex)];
+
+                auto value = cache.get(hash);
+                expect(value.isNotEmpty());
+                expect(value == "String " + String{ hashIndex });
+            }
+
+            for (int i = 0; i < 1000; ++i)
+            {
+                auto hashIndex = getRandom().nextInt((int)hashes.size());
+                auto hash = hashes[static_cast<size_t>(hashIndex)];
+
+                cache.erase(hash);
+                expect(!cache.contains(hash));
+            }
+        }
+
+        {
+            LeastRecentlyUsedCache<int, float> cache;
+
+            for (int i = 0; i < 10; ++i)
+            {
+                cache.set(i, static_cast<float>(i) * -1.0f);
+            }
+
+            for (int i = 9; i >= 0; --i)
+            {
+                auto value = cache.get(i);
+                expect(cache.contains(i));
+                expect(approximatelyEqual(value, static_cast<float>(i) * -1.0f));
+            }
+
+            for (int i = 9; i >= 0; --i)
+            {
+                auto backValue = cache.back();
+                auto expectedValue = static_cast<float>(i) * -1.0f;
+                expect(cache.contains(i));
+                expect(approximatelyEqual(backValue, expectedValue));
+
+                cache.popBack();
+            }
+
+            expect(cache.size() == 0);
+        }
+    }
+};
+
+static LeastRecentlyUsedCacheTests leastRecentlyUsedCacheTests;
+
+#endif
 
 } // namespace direct2d
 

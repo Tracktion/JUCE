@@ -16,11 +16,6 @@
   ==============================================================================
 */
 
-#if ! defined(_WINDEF_) && ! defined(__INTELLISENSE__)
-class HWND__; // Forward or never
-typedef HWND__* HWND;
-#endif
-
 namespace juce
 {
 

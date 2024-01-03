@@ -66,12 +66,12 @@ namespace juce
         DirectX::DXGI::Adapter::Ptr adapter_)
         : ImagePixelData(source_->pixelFormat, source_->width, source_->height),
         deviceIndependentClipArea(clipArea_ + source_->deviceIndependentClipArea.getPosition()),
+        adapterBitmap(source_->adapterBitmap),
         imageAdapter(adapter_),
         area(source_->area.withZeroOrigin()),
         pixelStride(source_->pixelStride),
         lineStride(source_->lineStride),
-        clearImage(false),
-        adapterBitmap(source_->adapterBitmap)
+        clearImage(false)
     {
         createAdapterBitmap();
 
@@ -121,7 +121,7 @@ namespace juce
             imageAdapter = directX->dxgi.adapters.getDefaultAdapter();
 
         deviceResources.create(imageAdapter, area.getDPIScalingFactor());
-        adapterBitmap.create(deviceResources.deviceContext.context, pixelFormat, area, lineStride);
+        adapterBitmap.create(deviceResources.deviceContext.context, pixelFormat, area, lineStride, clearImage);
     }
 
     void Direct2DPixelData::release()
@@ -130,10 +130,15 @@ namespace juce
         {
             listeners.call(&Listener::imageDataBeingDeleted, this);
         }
+
         imageAdapter = nullptr;
         deviceResources.release();
         adapterBitmap.release();
-        mappableBitmap.release();
+
+        for (auto bitmap : mappableBitmaps)
+        {
+            bitmap->release();
+        }
     }
 
     ReferenceCountedObjectPtr<Direct2DPixelData> Direct2DPixelData::fromDirect2DBitmap(ID2D1Bitmap1* const bitmap,
@@ -153,7 +158,7 @@ namespace juce
         auto bitmap = getAdapterD2D1Bitmap(imageAdapter);
         jassert(bitmap);
 
-        auto context = std::make_unique<Direct2ImageContext>(imageAdapter, clearImage);
+        auto context = std::make_unique<Direct2DImageContext>(imageAdapter);
         context->startFrame(bitmap, getDPIScalingFactor());
         context->clipToRectangle(deviceIndependentClipArea);
         context->setOrigin(deviceIndependentClipArea.getPosition());
@@ -203,26 +208,29 @@ namespace juce
         bitmap.pixelStride = pixelStride;
         bitmap.data = nullptr;
 
+        auto mappableBitmap = new MappableBitmap{};
+
         if (auto sourceBitmap = getAdapterD2D1Bitmap(imageAdapter))
         {
-            mappableBitmap.createAndMap(sourceBitmap,
+            mappableBitmap->createAndMap(sourceBitmap,
                 pixelFormat,
                 Rectangle<int>{ x, y, width, height },
                 deviceResources.deviceContext.context,
                 deviceIndependentClipArea,
                 area.getDPIScalingFactor(),
                 lineStride);
+            mappableBitmaps.add(mappableBitmap);
         }
 
-        bitmap.lineStride = (int) mappableBitmap.mappedRect.pitch;
-        bitmap.data = mappableBitmap.mappedRect.bits;
-        bitmap.size = (size_t) mappableBitmap.mappedRect.pitch * (size_t) height;
+        bitmap.lineStride = (int) mappableBitmap->mappedRect.pitch;
+        bitmap.data = mappableBitmap->mappedRect.bits;
+        bitmap.size = (size_t) mappableBitmap->mappedRect.pitch * (size_t) height;
 
         auto bitmapDataScaledArea = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea({ width, height }, area.getDPIScalingFactor());
         bitmap.width = bitmapDataScaledArea.getPhysicalArea().getWidth();
         bitmap.height = bitmapDataScaledArea.getPhysicalArea().getHeight();
 
-        bitmap.dataReleaser = std::make_unique<Direct2DBitmapReleaser>(*this, mode);
+        bitmap.dataReleaser = std::make_unique<Direct2DBitmapReleaser>(*this, mappableBitmap, mode);
 
         if (mode != Image::BitmapData::readOnly) sendDataChangeMessage();
     }
@@ -241,9 +249,9 @@ namespace juce
         if (sourceD2D1Bitmap && destinationD2D1Bitmap)
         {
             auto hr = destinationD2D1Bitmap->CopyFromBitmap(&destinationPoint, sourceD2D1Bitmap, &sourceRectU);
-        jassertquiet(SUCCEEDED(hr));
-        if (SUCCEEDED(hr))
-        {
+            jassertquiet(SUCCEEDED(hr));
+            if (SUCCEEDED(hr))
+            {
                 return clone;
             }
         }
@@ -290,15 +298,17 @@ namespace juce
         }
     }
 
-    Direct2DPixelData::Direct2DBitmapReleaser::Direct2DBitmapReleaser(Direct2DPixelData& pixelData_, Image::BitmapData::ReadWriteMode mode_)
+    Direct2DPixelData::Direct2DBitmapReleaser::Direct2DBitmapReleaser(Direct2DPixelData& pixelData_, ReferenceCountedObjectPtr<MappableBitmap> mappableBitmap_, Image::BitmapData::ReadWriteMode mode_)
         : pixelData(pixelData_),
+        mappableBitmap(mappableBitmap_),
         mode(mode_)
     {
     }
 
     Direct2DPixelData::Direct2DBitmapReleaser::~Direct2DBitmapReleaser()
     {
-        pixelData.mappableBitmap.unmap(pixelData.adapterBitmap.get(), mode);
+        mappableBitmap->unmap(pixelData.adapterBitmap.get(), mode);
+        pixelData.mappableBitmaps.removeObject(mappableBitmap);
     }
 
     //==============================================================================
@@ -308,8 +318,117 @@ namespace juce
 
     ImagePixelData::Ptr NativeImageType::create(Image::PixelFormat format, int width, int height, bool clearImage) const
     {
+        if (format == Image::RGB)
+        {
+            //
+            // Direct2D does not support RGB bitmaps and there's quite a bit of legacy code that assumes the
+            // actual bitmap format will match the requested format, despite the documentation saying otherwise
+            // (including the JUCE Windows implementation of CameraDevice).
+            //
+            // Fall back to a software RGB image if RGB is requested
+            //
+            return SoftwareImageType{}.create(format, width, height, clearImage);
+        }
+
         auto area = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea({ width, height }, scaleFactor);
         return new Direct2DPixelData{ format, area, clearImage };
     }
+
+    //==============================================================================
+    //
+    // Unit test
+    //
+
+#if JUCE_UNIT_TESTS
+
+    class Direct2DImageUnitTest final : public UnitTest
+    {
+    public:
+        Direct2DImageUnitTest()
+            : UnitTest("Direct2DImageUnitTest", UnitTestCategories::graphics)
+        {}
+
+        void runTest() override
+        {
+            beginTest("Direct2DImageUnitTest");
+
+            auto softwareImage = Image{ SoftwareImageType{}.create(Image::ARGB, 100, 100, true) };
+            {
+                Graphics g{ softwareImage };
+                g.fillCheckerBoard(softwareImage.getBounds().toFloat(), 21.0f, 21.0f, juce::Colours::hotpink, juce::Colours::turquoise);
+            }
+
+            auto direct2DImage = NativeImageType{}.convert(softwareImage);
+
+            {
+                Image::BitmapData softwareBitmapData{ softwareImage, Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::readOnly };
+
+                expect(softwareBitmapData.width == direct2DBitmapData.width);
+                expect(softwareBitmapData.height == direct2DBitmapData.height);
+
+                for (int x = 0; x < softwareBitmapData.width; ++x)
+                {
+                    for (int y = 0; y < softwareBitmapData.height; ++y)
+                    {
+                        expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData.getPixelColour(x, y));
+                    }
+                }
+            }
+
+            {
+                Rectangle<int> area1{ 10, 10, 50, 50 };
+                Rectangle<int> area2{ 30, 70, 20, 20 };
+                Image::BitmapData softwareBitmapData{ softwareImage, Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData direct2DBitmapData1{ direct2DImage, area1.getX(), area1.getY(), area1.getWidth(), area1.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData direct2DBitmapData2{ direct2DImage, area2.getX(), area2.getY(), area2.getWidth(), area2.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+
+                for (int x = 0; x < softwareBitmapData.width; ++x)
+                {
+                    for (int y = 0; y < softwareBitmapData.height; ++y)
+                    {
+                        if (area1.contains(x, y))
+                        {
+                            expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData1.getPixelColour(x - area1.getX(), y - area1.getY()));
+                        }
+
+                        if (area2.contains(x, y))
+                        {
+                            expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData2.getPixelColour(x - area2.getX(), y - area2.getY()));
+                        }
+                    }
+                }
+            }
+
+            {
+                int x = getRandom().nextInt(direct2DImage.getWidth());
+
+                {
+                    Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::writeOnly };
+
+                    for (int y = 0; y < direct2DBitmapData.height; ++y)
+                    {
+                        direct2DBitmapData.setPixelColour(x, y, juce::Colours::orange);
+                    }
+                }
+
+                {
+                    Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::readOnly };
+
+                    for (int y = 0; y < direct2DBitmapData.height; ++y)
+                    {
+                        expect(direct2DBitmapData.getPixelColour(x, y) == juce::Colours::orange);
+                    }
+                }
+            }
+
+        }
+    };
+
+    static Direct2DImageUnitTest direct2DImageUnitTest;
+
+#endif
+
+
 
 } // namespace juce

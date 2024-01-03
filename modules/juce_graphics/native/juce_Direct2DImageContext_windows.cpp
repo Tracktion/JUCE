@@ -38,7 +38,7 @@ namespace juce
 
     //==============================================================================
 
-    struct Direct2ImageContext::ImagePimpl : public Direct2DGraphicsContext::Pimpl
+    struct Direct2DImageContext::ImagePimpl : public Direct2DGraphicsContext::Pimpl
     {
     private:
         ComSmartPtr<ID2D1Bitmap1> targetBitmap;
@@ -52,7 +52,7 @@ namespace juce
         JUCE_DECLARE_WEAK_REFERENCEABLE(ImagePimpl)
 
     public:
-        ImagePimpl(Direct2ImageContext& owner_, DirectX::DXGI::Adapter::Ptr adapter_)
+        ImagePimpl(Direct2DImageContext& owner_, DirectX::DXGI::Adapter::Ptr adapter_)
             : Pimpl(owner_, false /* opaque */)
         {
             adapter = adapter_;
@@ -96,23 +96,22 @@ namespace juce
 
     //==============================================================================
 
-    Direct2ImageContext::Direct2ImageContext(DirectX::DXGI::Adapter::Ptr adapter_, bool clearImage_) :
-        pimpl(new ImagePimpl{ *this, adapter_ }),
-        clearImage(clearImage_)
+    Direct2DImageContext::Direct2DImageContext(DirectX::DXGI::Adapter::Ptr adapter_) :
+        pimpl(new ImagePimpl{ *this, adapter_ })
     {
     }
 
-    Direct2ImageContext::~Direct2ImageContext()
+    Direct2DImageContext::~Direct2DImageContext()
     {
         endFrame();
     }
 
-    Direct2DGraphicsContext::Pimpl* Direct2ImageContext::getPimpl() const noexcept
+    Direct2DGraphicsContext::Pimpl* Direct2DImageContext::getPimpl() const noexcept
     {
         return pimpl.get();
     }
 
-    void Direct2ImageContext::startFrame(ID2D1Bitmap1* bitmap, float dpiScaleFactor)
+    void Direct2DImageContext::startFrame(ID2D1Bitmap1* bitmap, float dpiScaleFactor)
     {
         pimpl->setTargetBitmap(bitmap);
         pimpl->setScaleFactor(dpiScaleFactor);
@@ -120,12 +119,11 @@ namespace juce
         Direct2DGraphicsContext::startFrame();
     }
 
-    void Direct2ImageContext::clearTargetBuffer()
+    void Direct2DImageContext::clearTargetBuffer()
     {
-        if (clearImage)
-        {
-            pimpl->getDeviceContext()->Clear(pimpl->backgroundColor);
-        }
+        //
+        // The bitmap was already cleared when it was created; do nothing here
+        //
     }
 
 } // namespace juce

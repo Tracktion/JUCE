@@ -22,10 +22,10 @@ namespace juce
 class Direct2DHwndContext : public Direct2DGraphicsContext
 {
 public:
-    Direct2DHwndContext (HWND, float dpiScalingFactor, bool opaque);
+    Direct2DHwndContext (void* windowHandle, float dpiScalingFactor, bool opaque);
     ~Direct2DHwndContext() override;
 
-    HWND getHwnd() const noexcept;
+    void* getHwnd() const noexcept;
     void handleShowWindow();
     void setWindowAlpha (float alpha);
 
