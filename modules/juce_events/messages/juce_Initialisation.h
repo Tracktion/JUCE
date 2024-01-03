@@ -70,6 +70,9 @@ public:
 
     /** The destructor simply calls shutdownJuce_GUI(). */
     ~ScopedJuceInitialiser_GUI();
+
+    JUCE_DECLARE_NON_COPYABLE (ScopedJuceInitialiser_GUI)
+    JUCE_DECLARE_NON_MOVEABLE (ScopedJuceInitialiser_GUI)
 };
 
 

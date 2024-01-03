@@ -4,6 +4,62 @@
 
 ## Change
 
+OpenGLContext::getRenderingScale() has been changed to include the effects of
+AffineTransforms on all platforms.
+
+**Possible Issues**
+
+Applications that use OpenGLContext::getRenderingScale() and also have scaling
+transformations that affect the context component's size may render incorrectly.
+
+**Workaround**
+
+Adjust rendering code by dividing the reported scale with the user specified
+transformation scale, if necessary.
+
+**Rationale**
+
+The previous implementation resulted in inconsistent behaviour between Windows
+and the other platforms. The main intended use-case for getRenderingScale() is
+to help determine the number of physical pixels covered by the context
+component. Since plugin windows will often use AffineTransforms to set up the
+correct rendering scale, it makes sense to include these in the result of
+getRenderingScale().
+
+
+## Change
+
+Components that have setMouseClickGrabsKeyboardFocus() set to false will not
+accept or propagate keyboard focus to parent components due to a mouse click
+event. This is now true even if the mouse click event happens in a child
+component with setMouseClickGrabsKeyboardFocus (true) and
+setWantsKeyboardFocus (false).
+
+**Possible Issues**
+
+Components that rely on child components propagating keyboard focus from a
+mouse click, when those child components have setMouseClickGrabsKeyboardFocus()
+set to false, will no longer grab keyboard focus.
+
+**Workaround**
+
+Add a MouseListener to the component receiving the click and override the
+mouseDown() method in the listener. In the mouseDown() method call
+Component::grabKeyboardFocus() for the component that should be focused.
+
+**Rationale**
+
+The intent of setMouseClickGrabsKeyboardFocus (false) is to reject focus changes
+coming from mouse clicks even if the component is otherwise capable of receiving
+keyboard focus.
+
+The previous behaviour could result in surprising focus changes when a child
+component was clicked. This manifested in the focus seemingly disappearing when
+a PopupMenu item added to a component was clicked.
+
+
+## Change
+
 The NodeID argument to AudioProcessorGraph::addNode() has been changed to take
 a std::optional<NodeID>.
 
