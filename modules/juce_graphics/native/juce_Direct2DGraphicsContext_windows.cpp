@@ -1099,16 +1099,23 @@ namespace juce
                 //
                 // Use a cached geometry realisation?
                 //
-                if (auto geometryRealisation = getPimpl()->getStrokedGeometryCache().getGeometryRealisation(p,
-                    strokeType,
-                    factory,
-                    deviceContext,
-                    std::sqrt(std::abs(transform.getDeterminant())),
-                    getPhysicalPixelScaleFactor()))
+                if (auto pathBounds = p.getBounds(); !pathBounds.isEmpty())
                 {
-                    updateDeviceContextTransform(transform);
-                    deviceContext->DrawGeometryRealization(geometryRealisation, currentState->currentBrush);
-                    return true;
+                    auto transformedPathBounds = p.getBoundsTransformed(transform);
+                    float xScale = transformedPathBounds.getWidth() / pathBounds.getWidth();
+                    float yScale = transformedPathBounds.getHeight() / pathBounds.getHeight();
+                    if (auto geometryRealisation = getPimpl()->getStrokedGeometryCache().getGeometryRealisation(p,
+                        strokeType,
+                        factory,
+                        deviceContext,
+                        xScale,
+                        yScale,
+                        getPhysicalPixelScaleFactor()))
+                    {
+                        updateDeviceContextTransform(AffineTransform::scale(1.0f / xScale, 1.0f / yScale, pathBounds.getX(), pathBounds.getY()).followedBy(transform));
+                        deviceContext->DrawGeometryRealization(geometryRealisation, currentState->currentBrush);
+                        return true;
+                    }
                 }
 
                 //

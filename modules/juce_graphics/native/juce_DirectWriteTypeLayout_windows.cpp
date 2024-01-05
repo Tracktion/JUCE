@@ -268,7 +268,7 @@ namespace DirectWriteTypeLayout
                                     CharPointer_UTF16 textPointer,
                                     const UINT32 textLen,
                                     ID2D1RenderTarget& renderTarget,
-                                    IDWriteFontCollection& fontCollection)
+                                    IDWriteFontCollection& systemFontCollection)
     {
         DWRITE_TEXT_RANGE range;
         range.startPosition = (UINT32) (textPointer.getAddress() - begin.getAddress());
@@ -280,28 +280,38 @@ namespace DirectWriteTypeLayout
         range.length = wordEnd - range.startPosition;
 
         {
-            auto familyName = FontStyleHelpers::getConcreteFamilyName (attr.font);
-
-            BOOL fontFound = false;
-            uint32 fontIndex;
-            fontCollection.FindFamilyName (familyName.toWideCharPointer(), &fontIndex, &fontFound);
-
-            if (! fontFound)
-                fontIndex = 0;
-
-            ComSmartPtr<IDWriteFontFamily> fontFamily;
-            [[maybe_unused]] auto hr = fontCollection.GetFontFamily (fontIndex, fontFamily.resetAndGetPointerAddress());
-
+            String familyName;
             ComSmartPtr<IDWriteFont> dwFont;
-            uint32 fontFacesCount = 0;
-            fontFacesCount = fontFamily->GetFontCount();
 
-            for (int i = (int) fontFacesCount; --i >= 0;)
+            if (auto* directWriteTypeface = dynamic_cast<WindowsDirectWriteTypeface*> (attr.font.getTypefacePtr().get()))
             {
-                hr = fontFamily->GetFont ((UINT32) i, dwFont.resetAndGetPointerAddress());
+                familyName = directWriteTypeface->getName();
+                dwFont = directWriteTypeface->getIDWriteFont();
+            }
+            else
+            {
+                familyName = FontStyleHelpers::getConcreteFamilyName(attr.font);
 
-                if (attr.font.getTypefaceStyle() == getFontFaceName (dwFont))
-                    break;
+                BOOL fontFound = false;
+                uint32 fontIndex;
+                systemFontCollection.FindFamilyName(familyName.toWideCharPointer(), &fontIndex, &fontFound);
+
+                if (!fontFound)
+                    fontIndex = 0;
+
+                ComSmartPtr<IDWriteFontFamily> fontFamily;
+                [[maybe_unused]] auto hr = systemFontCollection.GetFontFamily(fontIndex, fontFamily.resetAndGetPointerAddress());
+
+                uint32 fontFacesCount = 0;
+                fontFacesCount = fontFamily->GetFontCount();
+
+                for (int i = (int)fontFacesCount; --i >= 0;)
+                {
+                    hr = fontFamily->GetFont((UINT32)i, dwFont.resetAndGetPointerAddress());
+
+                    if (attr.font.getTypefaceStyle() == getFontFaceName(dwFont))
+                        break;
+                }
             }
 
             textLayout.SetFontFamilyName (familyName.toWideCharPointer(), range);
@@ -400,13 +410,13 @@ namespace DirectWriteTypeLayout
     static void createLayout (TextLayout& layout,
                               const AttributedString& text,
                               IDWriteFactory& directWriteFactory,
-                              IDWriteFontCollection& fontCollection,
+                              IDWriteFontCollection& systemFontCollection,
                               ID2D1DCRenderTarget& renderTarget)
     {
         ComSmartPtr<IDWriteTextLayout> dwTextLayout;
 
         if (! setupLayout (text, layout.getWidth(), layout.getHeight(), renderTarget,
-                           directWriteFactory, fontCollection, dwTextLayout))
+                           directWriteFactory, systemFontCollection, dwTextLayout))
             return;
 
         UINT32 actualLineCount = 0;
@@ -415,7 +425,7 @@ namespace DirectWriteTypeLayout
         layout.ensureStorageAllocated ((int) actualLineCount);
 
         {
-            ComSmartPtr<CustomDirectWriteTextRenderer> textRenderer (new CustomDirectWriteTextRenderer (fontCollection, text));
+            ComSmartPtr<CustomDirectWriteTextRenderer> textRenderer (new CustomDirectWriteTextRenderer (systemFontCollection, text));
             hr = dwTextLayout->Draw (&layout, textRenderer, 0, 0);
         }
 
@@ -467,8 +477,8 @@ namespace DirectWriteTypeLayout
                 dwTextLayout->GetMetrics(&metrics);
                 area.translate(0.0f, (float)area.getHeight() - metrics.height);
                 break;
+            }
         }
-    }
 
             return dwTextLayout;
         }

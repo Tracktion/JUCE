@@ -99,8 +99,6 @@ public:
 
         // Get a specific font in the font family using typeface style
         {
-            ComSmartPtr<IDWriteFont> dwFont;
-
             for (int i = (int) dwFontFamily->GetFontCount(); --i >= 0;)
             {
                 hr = dwFontFamily->GetFont ((UINT32) i, dwFont.resetAndGetPointerAddress());
@@ -157,15 +155,14 @@ public:
         // Only supports one font per family
         //
         {
-            ComSmartPtr<IDWriteFont> directWriteFont;
-            auto hr = fontFamily->GetFont(0, directWriteFont.resetAndGetPointerAddress());
+            auto hr = fontFamily->GetFont(0, dwFont.resetAndGetPointerAddress());
             if (FAILED(hr))
             {
                 return;
             }
 
             ComSmartPtr<IDWriteLocalizedStrings> faceNames;
-            hr = directWriteFont->GetFaceNames(faceNames.resetAndGetPointerAddress());
+            hr = dwFont->GetFaceNames(faceNames.resetAndGetPointerAddress());
             if (FAILED(hr))
             {
                 return;
@@ -175,7 +172,7 @@ public:
 
             style = getLocalisedName(faceNames);
 
-            hr = directWriteFont->CreateFontFace(dwFontFace.resetAndGetPointerAddress());
+            hr = dwFont->CreateFontFace(dwFontFace.resetAndGetPointerAddress());
             if (FAILED(hr))
             {
                 return;
@@ -249,12 +246,14 @@ public:
         return true;
     }
 
+    IDWriteFont* getIDWriteFont() const noexcept { return dwFont; }
     IDWriteFontFace* getIDWriteFontFace() const noexcept    { return dwFontFace; }
 
     float getUnitsToHeightScaleFactor() const noexcept      { return unitsToHeightScaleFactor; }
 
 private:
     SharedResourcePointer<DirectX> directX;
+    ComSmartPtr<IDWriteFont> dwFont;
     ComSmartPtr<IDWriteFontFace> dwFontFace;
     float unitsToHeightScaleFactor = 1.0f, heightToPointsFactor = 1.0f, ascent = 0;
     int designUnitsPerEm = 0;

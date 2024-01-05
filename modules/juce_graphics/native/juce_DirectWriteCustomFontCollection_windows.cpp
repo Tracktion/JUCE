@@ -168,4 +168,5 @@ public:
     ComSmartPtr<IDWriteFontCollection> customFontCollection;
     int64 const                        key = Time::getHighResolutionTicks();
 };
+
 } // namespace juce

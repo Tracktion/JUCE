@@ -411,7 +411,8 @@ namespace juce
                 const PathStrokeType& strokeType,
                 ID2D1Factory2* factory,
                 ID2D1DeviceContext1* deviceContext,
-                float transformScaleFactor,
+                float xScaleFactor,
+                float yScaleFactor,
                 float dpiScaleFactor)
             {
                 if (path.getModificationCount() == 0 || !path.isCacheEnabled() || !path.shouldBeCached())
@@ -419,8 +420,8 @@ namespace juce
                     return nullptr;
                 }
 
-                auto flatteningTolerance = findGeometryFlatteningTolerance(dpiScaleFactor * transformScaleFactor);
-                auto hash = calculatePathHash(path, strokeType, flatteningTolerance, transformScaleFactor);
+                auto flatteningTolerance = findGeometryFlatteningTolerance(dpiScaleFactor * (xScaleFactor + yScaleFactor) * 0.5f);
+                auto hash = calculatePathHash(path, strokeType, flatteningTolerance, xScaleFactor, yScaleFactor);
 
                 if (auto cachedGeometry = hashMap.getCachedGeometryRealisation(hash))
                 {
@@ -435,7 +436,8 @@ namespace juce
 #if JUCE_DIRECT2D_METRICS
                         auto t1 = Time::getHighResolutionTicks();
 #endif
-                        if (auto geometry = direct2d::pathToPathGeometry(factory, path, D2D1_FIGURE_BEGIN_HOLLOW))
+                        auto transform = AffineTransform::scale(xScaleFactor, yScaleFactor, path.getBounds().getX(), path.getBounds().getY());
+                        if (auto geometry = direct2d::pathToPathGeometry(factory, path, transform, D2D1_FIGURE_BEGIN_HOLLOW))
                         {
 #if JUCE_DIRECT2D_METRICS
                             auto t2 = Time::getHighResolutionTicks();
@@ -449,7 +451,7 @@ namespace juce
                                 //
                                 auto hr = deviceContext->CreateStrokedGeometryRealization(geometry,
                                     flatteningTolerance,
-                                    strokeType.getStrokeThickness() / transformScaleFactor,
+                                    strokeType.getStrokeThickness(),
                                     strokeStyle,
                                     cachedGeometry->geometryRealisation.resetAndGetPointerAddress());
 
@@ -481,15 +483,16 @@ namespace juce
 
         private:
 
-            uint64 calculatePathHash(Path const& path, PathStrokeType const& strokeType, float flatteningTolerance, float transformScaleFactor)
+            uint64 calculatePathHash(Path const& path, PathStrokeType const& strokeType, float flatteningTolerance, float xScaleFactor, float yScaleFactor)
             {
                 struct
                 {
-                    float transformScaleFactor, flatteningTolerance, strokeThickness;
+                    float xScaleFactor, yScaleFactor, flatteningTolerance, strokeThickness;
                     int8 jointStyle, endStyle;
                 } extraHashData;
 
-                extraHashData.transformScaleFactor = transformScaleFactor;
+                extraHashData.xScaleFactor = xScaleFactor;
+                extraHashData.yScaleFactor = yScaleFactor;
                 extraHashData.flatteningTolerance = flatteningTolerance;
                 extraHashData.strokeThickness = strokeType.getStrokeThickness();
                 extraHashData.jointStyle = (int8)strokeType.getJointStyle();
