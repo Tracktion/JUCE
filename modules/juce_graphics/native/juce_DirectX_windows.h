@@ -82,7 +82,14 @@ struct DirectX
             {
                 ComSmartPtr<IDXGIFactory2> result;
                 JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wlanguage-extension-token")
-                CreateDXGIFactory(__uuidof (IDXGIFactory2), (void**)result.resetAndGetPointerAddress());
+                [[maybe_unused]] auto hr = CreateDXGIFactory(__uuidof (IDXGIFactory2), (void**)result.resetAndGetPointerAddress());
+
+                //
+                // If this is a plugin or other DLL, the DXGI factory cannot be created in the context of DllMain.
+                // Try creating your image or window from the message thread
+                //
+                jassert(SUCCEEDED(hr));
+
                 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
                 return result;
             }();
@@ -162,7 +169,7 @@ struct DirectX
                     // This flag adds support for surfaces with a different color channel ordering
                     // than the API default. It is required for compatibility with Direct2D.
                     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if JUCE_DEBUG
+#if JUCE_DIRECTX_DEBUG
                     creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
                     jassert(dxgiAdapter);

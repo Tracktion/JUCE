@@ -517,6 +517,7 @@ public:
         @code myImage = SoftwareImageType().convert (myImage); @endcode
     */
     virtual Image convert (const Image& source) const;
+    virtual Image convertFromBitmapData (Image::BitmapData const& source) const;
 };
 
 //==============================================================================

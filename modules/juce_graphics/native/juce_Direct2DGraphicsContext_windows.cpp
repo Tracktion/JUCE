@@ -1035,6 +1035,17 @@ namespace juce
 
             updateDeviceContextTransform();
             deviceContext->DrawRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush, lineThickness);
+
+            //
+            // ID2D1DeviceContext::DrawRectangle centers the stroke around the edges of the specified rectangle, but
+            // the software renderer contains the stroke within the rectangle
+            //
+            // To match the software renderer, reduce the rectangle by half the stroke width
+            //
+            lineThickness = juce::jmin(lineThickness, r.getHeight() * 0.5f, r.getWidth() * 0.5f);
+            auto xReduction = juce::jmin(r.getHeight() * 0.25f, lineThickness * 0.5f);
+            auto yReduction = juce::jmin(r.getWidth() * 0.25f, lineThickness * 0.5f);
+            deviceContext->DrawRectangle(direct2d::rectangleToRectF(r.reduced(xReduction, yReduction)), currentState->currentBrush, lineThickness);
         }
 
         return true;

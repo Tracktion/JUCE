@@ -27,8 +27,11 @@ namespace juce
 DirectX::DirectWrite::DirectWrite()
 {
     JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wlanguage-extension-token")
-    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof (IDWriteFactory),
+
+    [[maybe_unused]] auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof (IDWriteFactory),
         (IUnknown**)directWriteFactory.resetAndGetPointerAddress());
+    jassert(SUCCEEDED(hr));
+
     JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
     if (directWriteFactory != nullptr)
@@ -112,14 +115,15 @@ DirectX::Direct2D::Direct2D()
 {
     {
         D2D1_FACTORY_OPTIONS options;
-#if JUCE_DEBUG
+#if JUCE_DIRECTX_DEBUG
         options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #else
         options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
 #endif
         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wlanguage-extension-token")
-        D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof (ID2D1Factory1), &options,
+        [[maybe_unused]] auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof (ID2D1Factory1), &options,
             (void**)d2dSharedFactory.resetAndGetPointerAddress());
+        jassert(SUCCEEDED(hr));
         JUCE_END_IGNORE_WARNINGS_GCC_LIKE
     }
 

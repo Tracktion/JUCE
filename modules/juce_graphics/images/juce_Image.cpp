@@ -113,7 +113,11 @@ Image ImageType::convert (const Image& source) const
         return source;
 
     const Image::BitmapData src (source, Image::BitmapData::readOnly);
+    return convertFromBitmapData (src);
+}
 
+Image ImageType::convertFromBitmapData (Image::BitmapData const& src) const
+{
     Image newImage (create (src.pixelFormat, src.width, src.height, false));
     Image::BitmapData dest (newImage, Image::BitmapData::writeOnly);
 
