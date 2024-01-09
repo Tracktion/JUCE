@@ -233,8 +233,7 @@ namespace juce
             // Convert the ARGB data to RGB
             // The alpha mode should be set to D2D1_ALPHA_MODE_IGNORE, so the alpha value can be skipped.
             //
-            auto softwareImage = SoftwareImageType{}.convertFromBitmapData(bitmap);
-            mappableBitmap->rgbProxyImage = softwareImage.convertedToFormat(Image::RGB);
+            mappableBitmap->rgbProxyImage = SoftwareImageType{}.convertFromBitmapData(bitmap);
             mappableBitmap->rgbProxyBitmapData = std::make_unique<Image::BitmapData>(mappableBitmap->rgbProxyImage, mode);
 
             //
@@ -360,98 +359,11 @@ namespace juce
         {
             beginTest("Direct2DImageUnitTest");
 
-            auto softwareImage = Image{ SoftwareImageType{}.create(Image::ARGB, 100, 100, true) };
-            {
-                Graphics g{ softwareImage };
-                g.fillCheckerBoard(softwareImage.getBounds().toFloat(), 21.0f, 21.0f, juce::Colours::hotpink, juce::Colours::turquoise);
-            }
+            compareSameFormat(Image::RGB);
+            compareSameFormat(Image::ARGB);
+            compareSameFormat(Image::SingleChannel);
 
-            auto direct2DImage = NativeImageType{}.convert(softwareImage);
-
-            {
-                //
-                // Bitmap data should match after conversion
-                //
-                Image::BitmapData softwareBitmapData{ softwareImage, Image::BitmapData::ReadWriteMode::readOnly };
-                Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::readOnly };
-
-                expect(softwareBitmapData.width == direct2DBitmapData.width);
-                expect(softwareBitmapData.height == direct2DBitmapData.height);
-
-                for (int x = 0; x < softwareBitmapData.width; ++x)
-                {
-                    for (int y = 0; y < softwareBitmapData.height; ++y)
-                    {
-                        expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData.getPixelColour(x, y));
-                    }
-                }
-            }
-
-            {
-                //
-                // Subsection data should match
-                //
-                // Should be able to have two different BitmapData objects simultaneously for the same source image
-                //
-                Rectangle<int> area1 = randomRectangleWithin(softwareImage.getBounds());
-                Rectangle<int> area2 = randomRectangleWithin(softwareImage.getBounds());
-                Image::BitmapData softwareBitmapData{ softwareImage, Image::BitmapData::ReadWriteMode::readOnly };
-                Image::BitmapData direct2DBitmapData1{ direct2DImage, area1.getX(), area1.getY(), area1.getWidth(), area1.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-                Image::BitmapData direct2DBitmapData2{ direct2DImage, area2.getX(), area2.getY(), area2.getWidth(), area2.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-
-                for (int x = 0; x < softwareBitmapData.width; ++x)
-                {
-                    for (int y = 0; y < softwareBitmapData.height; ++y)
-                    {
-                        if (area1.contains(x, y))
-                        {
-                            expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData1.getPixelColour(x - area1.getX(), y - area1.getY()));
-                        }
-
-                        if (area2.contains(x, y))
-                        {
-                            expect(softwareBitmapData.getPixelColour(x, y) == direct2DBitmapData2.getPixelColour(x - area2.getX(), y - area2.getY()));
-                        }
-                    }
-                }
-            }
-
-            {
-                //
-                // BitmapData width & height should match
-                //
-                Rectangle<int> area = randomRectangleWithin(softwareImage.getBounds());
-                Image::BitmapData softwareBitmapData{ softwareImage, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-                Image::BitmapData direct2DBitmapData{ direct2DImage, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-
-                expect(softwareBitmapData.width == direct2DBitmapData.width);
-                expect(softwareBitmapData.height == direct2DBitmapData.height);
-            }
-
-            {
-                //
-                // Check read and write modes
-                //
-                int x = getRandom().nextInt(direct2DImage.getWidth());
-
-                {
-                    Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::writeOnly };
-
-                    for (int y = 0; y < direct2DBitmapData.height; ++y)
-                    {
-                        direct2DBitmapData.setPixelColour(x, y, juce::Colours::orange);
-                    }
-                }
-
-                {
-                    Image::BitmapData direct2DBitmapData{ direct2DImage, Image::BitmapData::ReadWriteMode::readOnly };
-
-                    for (int y = 0; y < direct2DBitmapData.height; ++y)
-                    {
-                        expect(direct2DBitmapData.getPixelColour(x, y) == juce::Colours::orange);
-                    }
-                }
-            }
+            testRGBToARGBConversion();
         }
 
         Rectangle<int> randomRectangleWithin(Rectangle<int> container) const noexcept
@@ -462,12 +374,178 @@ namespace juce
             auto w = getRandom().nextInt(container.getWidth() - y);
             return Rectangle<int>{ x, y, w, h };
         }
+
+        void compareSameFormat(Image::PixelFormat format)
+        {
+            auto softwareImage = Image{ SoftwareImageType{}.create(format, 100, 100, true) };
+            {
+                Graphics g{ softwareImage };
+                g.fillCheckerBoard(softwareImage.getBounds().toFloat(), 21.0f, 21.0f, makeRandomColor(), makeRandomColor());
+            }
+
+            auto direct2DImage = NativeImageType{}.convert(softwareImage);
+
+            compareImages(softwareImage, direct2DImage);
+            checkReadWriteModes(softwareImage);
+            checkReadWriteModes(direct2DImage);
+        }
+
+        void compareImages(Image& image1, Image& image2,
+            std::function<bool(Colour, Colour)> compareColors =
+            [](Colour a, Colour b) { return a == b; })
+        {
+
+            {
+                //
+                // Bitmap data should match after ImageType::convert
+                //
+                Image::BitmapData data1{ image1, Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData data2{ image2, Image::BitmapData::ReadWriteMode::readOnly };
+
+                expect(data1.width == data2.width);
+                expect(data1.height == data2.height);
+
+                for (int x = 0; x < data1.width; ++x)
+                {
+                    for (int y = 0; y < data1.height; ++y)
+                    {
+                        expect(compareColors(data1.getPixelColour(x, y), data2.getPixelColour(x, y)));
+                    }
+                }
+            }
+
+            {
+                //
+                // Subsection data should match
+                //
+                // Should be able to have two different BitmapData objects simultaneously for the same source image
+                //
+                Rectangle<int> area1 = randomRectangleWithin(image1.getBounds());
+                Rectangle<int> area2 = randomRectangleWithin(image1.getBounds());
+                Image::BitmapData data1{ image1, Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData data2a{ image2, area1.getX(), area1.getY(), area1.getWidth(), area1.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData data2b{ image2, area2.getX(), area2.getY(), area2.getWidth(), area2.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+
+                for (int x = 0; x < data1.width; ++x)
+                {
+                    for (int y = 0; y < data1.height; ++y)
+                    {
+                        if (area1.contains(x, y))
+                        {
+                            auto a = data1.getPixelColour(x, y);
+                            auto b = data2a.getPixelColour(x - area1.getX(), y - area1.getY());
+                            expect(compareColors(a, b));
+                        }
+
+                        if (area2.contains(x, y))
+                        {
+                            auto a = data1.getPixelColour(x, y);
+                            auto b = data2a.getPixelColour(x - area2.getX(), y - area2.getY());
+                            expect(compareColors(a, b));
+                        }
+                    }
+                }
+            }
+
+            {
+                //
+                // BitmapData width & height should match
+                //
+                Rectangle<int> area = randomRectangleWithin(image1.getBounds());
+                Image::BitmapData data1{ image1, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData data2{ image2, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+
+                expect(data1.width == data2.width);
+                expect(data1.height == data2.height);
+            }
+        }
+
+        void checkReadWriteModes(Image& image)
+        {
+            //
+            // Check read and write modes
+            //
+            int x = getRandom().nextInt(image.getWidth());
+            auto writeColor = makeRandomColor().withAlpha(1.0f);
+            auto expectedColor = writeColor;
+            switch (image.getFormat())
+            {
+            case Image::SingleChannel:
+            {
+                auto alpha = writeColor.getAlpha();
+                expectedColor = Colour{ alpha, alpha, alpha, alpha };
+                break;
+            }
+
+            case Image::RGB:
+            case Image::ARGB:
+                break;
+
+            case Image::UnknownFormat:
+            default:
+                jassertfalse;
+                break;
+            }
+
+            {
+                Image::BitmapData data{ image, Image::BitmapData::ReadWriteMode::writeOnly };
+
+                for (int y = 0; y < data.height; ++y)
+                {
+                    data.setPixelColour(x, y, writeColor);
+                }
+            }
+
+            {
+                Image::BitmapData data{ image, Image::BitmapData::ReadWriteMode::readOnly };
+
+                for (int y = 0; y < data.height; ++y)
+                {
+                    auto color = data.getPixelColour(x, y);
+                    expect(color == expectedColor);
+                }
+            }
+        }
+
+        void testRGBToARGBConversion()
+        {
+            auto softwareRGBImage = Image{ SoftwareImageType{}.create(Image::RGB, 100, 100, true) };
+            {
+                Graphics g{ softwareRGBImage };
+                g.fillCheckerBoard(softwareRGBImage.getBounds().toFloat(), 21.0f, 21.0f, makeRandomColor(), makeRandomColor());
+            }
+            auto softwareARGBImage = softwareRGBImage.convertedToFormat(Image::ARGB);
+
+            auto compareRGBToARGB = [](Colour c1, Colour c2)
+                {
+                    return c1.getARGB() == c2.withAlpha((uint8)255).getARGB();
+                };
+
+            compareImages(softwareRGBImage, softwareARGBImage, compareRGBToARGB);
+
+            auto direct2DRGBImage = NativeImageType{}.convert(softwareRGBImage);
+
+            compareImages(softwareRGBImage, direct2DRGBImage);
+
+            auto direct2DARGBImage = direct2DRGBImage.convertedToFormat(Image::ARGB);
+
+            compareImages(softwareRGBImage, direct2DARGBImage, compareRGBToARGB);
+            compareImages(softwareARGBImage, direct2DARGBImage);
+        }
+
+        Colour makeRandomColor()
+        {
+            auto random = getRandom();
+            uint8 red = (uint8)random.nextInt(255);
+            uint8 green = (uint8)random.nextInt(255);
+            uint8 blue = (uint8)random.nextInt(255);
+            uint8 alpha = (uint8)random.nextInt(255);
+            return Colour{ red, green, blue, alpha };
+        }
     };
 
     static Direct2DImageUnitTest direct2DImageUnitTest;
 
 #endif
-
-
 
 } // namespace juce

@@ -1042,9 +1042,9 @@ namespace juce
             //
             // To match the software renderer, reduce the rectangle by half the stroke width
             //
-            lineThickness = juce::jmin(lineThickness, r.getHeight() * 0.5f, r.getWidth() * 0.5f);
-            auto xReduction = juce::jmin(r.getHeight() * 0.25f, lineThickness * 0.5f);
-            auto yReduction = juce::jmin(r.getWidth() * 0.25f, lineThickness * 0.5f);
+            lineThickness = juce::jmin(lineThickness, r.getHeight(), r.getWidth());
+            auto xReduction = juce::jmin(r.getHeight() * 0.5f, lineThickness * 0.5f);
+            auto yReduction = juce::jmin(r.getWidth() * 0.5f, lineThickness * 0.5f);
             deviceContext->DrawRectangle(direct2d::rectangleToRectF(r.reduced(xReduction, yReduction)), currentState->currentBrush, lineThickness);
         }
 
@@ -1160,20 +1160,23 @@ namespace juce
             updateDeviceContextTransform(transform);
 
             //
-            // Is this a Direct2D image already?
+            // Is this a Direct2D image already with the correct format?
             //
             if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (image.getPixelData()))
             {
                 if (auto bitmap = direct2DPixelData->getAdapterD2D1Bitmap(getPimpl()->getAdapter()))
                 {
-                    D2D1_RECT_F sourceRectangle = direct2d::rectangleToRectF(direct2DPixelData->deviceIndependentClipArea);
-                    deviceContext->DrawBitmap(bitmap,
-                        nullptr,
-                        currentState->fillType.getOpacity(),
-                        currentState->interpolationMode,
-                        &sourceRectangle,
-                        {});
-                    return;
+                    if (bitmap->GetPixelFormat().format == DXGI_FORMAT_B8G8R8A8_UNORM)
+                    {
+                        D2D1_RECT_F sourceRectangle = direct2d::rectangleToRectF(direct2DPixelData->deviceIndependentClipArea);
+                        deviceContext->DrawBitmap(bitmap,
+                            nullptr,
+                            currentState->fillType.getOpacity(),
+                            currentState->interpolationMode,
+                            &sourceRectangle,
+                            {});
+                        return;
+                    }
                 }
             }
 

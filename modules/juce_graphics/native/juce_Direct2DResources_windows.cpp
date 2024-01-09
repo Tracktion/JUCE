@@ -131,7 +131,7 @@ namespace juce
                     break;
 
                 case Image::SingleChannel:
-                    bitmapProperties.pixelFormat.format = DXGI_FORMAT_R8_UNORM;
+                    bitmapProperties.pixelFormat.format = DXGI_FORMAT_A8_UNORM;
                     break;
 
                 case Image::UnknownFormat:
@@ -163,18 +163,17 @@ namespace juce
                     bitmapProperties.dpiX = dpiScaleFactor * USER_DEFAULT_SCREEN_DPI;;
                     bitmapProperties.dpiY = bitmapProperties.dpiX;
                     bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-                    bitmapProperties.pixelFormat.format =
-                        (format == Image::SingleChannel) ? DXGI_FORMAT_A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+                    bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
                     bitmapProperties.bitmapOptions = options;
 
                     switch (format)
                     {
                     case Image::RGB:
                         bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-                            break;
+                        break;
 
                     case Image::SingleChannel:
-                        bitmapProperties.pixelFormat.format = DXGI_FORMAT_R8_UNORM;
+                        bitmapProperties.pixelFormat.format = DXGI_FORMAT_A8_UNORM;
                         break;
 
                     case Image::UnknownFormat:

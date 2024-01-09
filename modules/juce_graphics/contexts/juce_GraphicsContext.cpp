@@ -595,10 +595,18 @@ void Graphics::drawRect (Rectangle<float> r, const float lineThickness) const
 {
     jassert (r.getWidth() >= 0.0f && r.getHeight() >= 0.0f);
 
+    /*
+    *
+    * This is left intentionally disabled for now since Direct2D draws
+    * rectangles differently
+    *
+    * Passing the rectangle list still performs nicely
+    *
     if (context.drawRect(r, lineThickness))
     {
         return;
     }
+    */
 
     RectangleList<float> rects;
     rects.addWithoutMerging (r.removeFromTop    (lineThickness));
