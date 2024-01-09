@@ -343,6 +343,21 @@ template<class sourcePixelType, class destinationPixelType> void convertBitmapDa
     }
 }
 
+template<> void convertBitmapData<PixelAlpha, PixelARGB>(const Image& source, Image& destination)
+{
+    const Image::BitmapData srcData(source, 0, 0, source.getWidth(), source.getHeight());
+    const Image::BitmapData destData(destination, 0, 0, destination.getWidth(), destination.getHeight(), Image::BitmapData::writeOnly);
+
+    for (int y = 0; y < destData.height; ++y)
+    {
+        auto src = reinterpret_cast<const PixelARGB*> (srcData.getLinePointer(y));
+        auto dst = destData.getLinePointer(y);
+
+        for (int x = 0; x < destData.width; ++x)
+            dst[x] = src[x].getAlpha();
+    }
+}
+
 Image Image::convertedToFormat(PixelFormat newFormat) const
 {
     if (image == nullptr || newFormat == image->pixelFormat)
