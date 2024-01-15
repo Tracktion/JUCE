@@ -260,4 +260,10 @@ bool ColourGradient::ColourPoint::operator!= (ColourPoint other) const noexcept
     return ! operator== (other);
 }
 
+uint64 ColourGradient::getHash() const noexcept
+{
+    return DefaultHashFunctions::generateHash(reinterpret_cast<uint8 const*>(colours.getRawDataPointer()), (size_t)colours.size() * sizeof(ColourPoint));
+}
+
+
 } // namespace juce

@@ -51,7 +51,7 @@ namespace juce
             area_.getDeviceIndependentHeight()),
         deviceIndependentClipArea(area_.withZeroOrigin().getDeviceIndependentArea()),
         imageAdapter(adapter_),
-        area(area_.withZeroOrigin()),
+        bitmapArea(area_.withZeroOrigin()),
         pixelStride((formatToUse == Image::SingleChannel) ? 1 : 4),
         lineStride((pixelStride* jmax(1, width) + 3) & ~3),
         clearImage(clearImage_)
@@ -64,10 +64,10 @@ namespace juce
     Direct2DPixelData::Direct2DPixelData(ReferenceCountedObjectPtr<Direct2DPixelData> source_,
         Rectangle<int> clipArea_,
         DirectX::DXGI::Adapter::Ptr adapter_)
-        : ImagePixelData(source_->pixelFormat, source_->width, source_->height),
+        : ImagePixelData(source_->pixelFormat, clipArea_.getWidth(), clipArea_.getHeight()),
         deviceIndependentClipArea(clipArea_ + source_->deviceIndependentClipArea.getPosition()),
         imageAdapter(adapter_),
-        area(source_->area.withZeroOrigin()),
+        bitmapArea(source_->bitmapArea.withZeroOrigin()),
         pixelStride(source_->pixelStride),
         lineStride(source_->lineStride),
         clearImage(false),
@@ -88,7 +88,7 @@ namespace juce
             area_.getDeviceIndependentHeight()),
         deviceIndependentClipArea(area_.getDeviceIndependentArea()),
         imageAdapter(adapter_),
-        area(area_.withZeroOrigin()),
+        bitmapArea(area_.withZeroOrigin()),
         pixelStride(4),
         lineStride((pixelStride* jmax(1, width) + 3) & ~3),
         clearImage(clearImage_)
@@ -98,9 +98,9 @@ namespace juce
             imageAdapter = directX->dxgi.adapters.getDefaultAdapter();
         }
 
-        deviceResources.create(imageAdapter, area.getDPIScalingFactor());
+        deviceResources.create(imageAdapter, getDPIScalingFactor());
 
-        adapterBitmap.set(d2d1Bitmap);
+        adapterBitmap.setD2D1Bitmap(d2d1Bitmap);
 
         directX->dxgi.adapters.listeners.add(this);
     }
@@ -112,7 +112,7 @@ namespace juce
 
     bool Direct2DPixelData::isValid() const noexcept
     {
-        return imageAdapter && imageAdapter->direct2DDevice && adapterBitmap.get() != nullptr;
+        return imageAdapter && imageAdapter->direct2DDevice && adapterBitmap.getD2D1Bitmap() != nullptr;
     }
 
     void Direct2DPixelData::createAdapterBitmap()
@@ -120,13 +120,13 @@ namespace juce
         if (!imageAdapter || !imageAdapter->direct2DDevice)
             imageAdapter = directX->dxgi.adapters.getDefaultAdapter();
 
-        deviceResources.create(imageAdapter, area.getDPIScalingFactor());
-        adapterBitmap.create(deviceResources.deviceContext.context, pixelFormat, area, lineStride, clearImage);
+        deviceResources.create(imageAdapter, getDPIScalingFactor());
+        adapterBitmap.create(deviceResources.deviceContext.context, pixelFormat, bitmapArea, lineStride, clearImage);
     }
 
     void Direct2DPixelData::release()
     {
-        if (adapterBitmap.get())
+        if (adapterBitmap.getD2D1Bitmap())
         {
             listeners.call(&Listener::imageDataBeingDeleted, this);
         }
@@ -145,7 +145,7 @@ namespace juce
         direct2d::DPIScalableArea<int> area)
     {
         Direct2DPixelData::Ptr pixelData = new Direct2DPixelData{ Image::ARGB, area, false };
-        pixelData->adapterBitmap.set(bitmap);
+        pixelData->adapterBitmap.setD2D1Bitmap(bitmap);
         return pixelData;
     }
 
@@ -181,7 +181,7 @@ namespace juce
         jassert(imageAdapter && imageAdapter->direct2DDevice);
         jassert(adapter->direct2DDevice == imageAdapter->direct2DDevice);
 
-        return adapterBitmap.get();
+        return adapterBitmap.getD2D1Bitmap();
     }
 
     void Direct2DPixelData::initialiseBitmapData(Image::BitmapData& bitmap, int x, int y, Image::BitmapData::ReadWriteMode mode)
@@ -217,7 +217,7 @@ namespace juce
                 Rectangle<int>{ x, y, width, height },
                 deviceResources.deviceContext.context,
                 deviceIndependentClipArea,
-                area.getDPIScalingFactor(),
+                getDPIScalingFactor(),
                 lineStride);
             mappableBitmaps.add(mappableBitmap);
         }
@@ -245,7 +245,7 @@ namespace juce
             bitmap.size = mappableBitmap->rgbProxyBitmapData->size;
         }
 
-        auto bitmapDataScaledArea = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea({ bitmap.width, bitmap.height }, area.getDPIScalingFactor());
+        auto bitmapDataScaledArea = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea({ bitmap.width, bitmap.height }, getDPIScalingFactor());
         bitmap.width = bitmapDataScaledArea.getPhysicalArea().getWidth();
         bitmap.height = bitmapDataScaledArea.getPhysicalArea().getHeight();
 
@@ -256,13 +256,16 @@ namespace juce
 
     ImagePixelData::Ptr Direct2DPixelData::clone()
     {
+        auto sourceArea = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea(deviceIndependentClipArea, getDPIScalingFactor());
+        sourceArea.clipToPhysicalArea(bitmapArea.getPhysicalArea());
+
         auto clone = new Direct2DPixelData{ pixelFormat,
-            area,
+            sourceArea,
             false,
             imageAdapter };
 
         D2D1_POINT_2U destinationPoint{ 0, 0 };
-        auto sourceRectU = area.getPhysicalAreaD2DRectU();
+        auto sourceRectU = sourceArea.getPhysicalAreaD2DRectU();
         auto sourceD2D1Bitmap = getAdapterD2D1Bitmap(imageAdapter);
         auto destinationD2D1Bitmap = clone->getAdapterD2D1Bitmap(imageAdapter);
         if (sourceD2D1Bitmap && destinationD2D1Bitmap)
@@ -282,21 +285,19 @@ namespace juce
     {
         sourceArea = sourceArea.getIntersection({ width, height });
 
-        return new Direct2DPixelData{ pixelFormat,
-            direct2d::DPIScalableArea<int>::fromDeviceIndependentArea(sourceArea, area.getDPIScalingFactor()),
-            false,
-            getAdapterD2D1Bitmap(imageAdapter),
+        return new Direct2DPixelData{ this,
+            sourceArea,
             imageAdapter };
     }
 
     float Direct2DPixelData::getDPIScalingFactor() const noexcept
     {
-        return area.getDPIScalingFactor();
+        return bitmapArea.getDPIScalingFactor();
     }
 
     std::unique_ptr<ImageType> Direct2DPixelData::createType() const
     {
-        return std::make_unique<NativeImageType>(area.getDPIScalingFactor());
+        return std::make_unique<NativeImageType>(getDPIScalingFactor());
     }
 
     void Direct2DPixelData::adapterCreated(DirectX::DXGI::Adapter::Ptr adapter)
@@ -326,7 +327,7 @@ namespace juce
 
     Direct2DPixelData::Direct2DBitmapReleaser::~Direct2DBitmapReleaser()
     {
-        mappableBitmap->unmap(pixelData.adapterBitmap.get(), mode);
+        mappableBitmap->unmap(pixelData.adapterBitmap.getD2D1Bitmap(), mode);
         pixelData.mappableBitmaps.removeObject(mappableBitmap);
     }
 
@@ -353,25 +354,90 @@ namespace juce
     public:
         Direct2DImageUnitTest()
             : UnitTest("Direct2DImageUnitTest", UnitTestCategories::graphics)
-        {}
+        {
+            compareFunctions[{Image::RGB, Image::RGB}] = [](uint8* rgb1, uint8* rgb2)
+                {
+                    return rgb1[0] == rgb2[0] &&
+                        rgb1[1] == rgb2[1] &&
+                        rgb1[2] == rgb2[2];
+                };
+
+            compareFunctions[{Image::RGB, Image::ARGB}] = [](uint8* rgb, uint8* argb)
+                {
+                    //
+                    // Compare bytes directly to avoid alpha premultiply issues
+                    //
+                    return rgb[0] == argb[0] &&  // blue
+                        rgb[1] == argb[1] && // green
+                        rgb[2] == argb[2]; // red
+                };
+
+            compareFunctions[{Image::RGB, Image::SingleChannel}] = [](uint8*, uint8* singleChannel)
+                {
+                    return *singleChannel == 0xff;
+                };
+
+
+            compareFunctions[{Image::ARGB, Image::RGB}] = [](uint8* argb, uint8* rgb)
+                {
+                    //
+                    // Compare bytes directly to avoid alpha premultiply issues
+                    //
+                    return argb[0] == rgb[0] &&
+                        argb[1] == rgb[1] &&
+                        argb[2] == rgb[2];
+                };
+
+            compareFunctions[{Image::ARGB, Image::ARGB}] = [](uint8* argb1, uint8* argb2)
+                {
+                    return *reinterpret_cast<uint32*>(argb1) == *reinterpret_cast<uint32*>(argb2);
+                };
+
+            compareFunctions[{Image::ARGB, Image::SingleChannel}] = [](uint8* argb, uint8* singleChannel)
+                {
+                    return argb[3] = *singleChannel;
+                };
+
+
+            compareFunctions[{Image::SingleChannel, Image::RGB}] = [](uint8* singleChannel, uint8* rgb)
+                {
+                    auto alpha = *singleChannel;
+                    return rgb[0] == alpha &&
+                        rgb[1] == alpha &&
+                        rgb[2] == alpha;
+                };
+
+            compareFunctions[{Image::SingleChannel, Image::ARGB}] = [](uint8* singleChannel, uint8* argb)
+                {
+                    return *singleChannel = argb[3];
+                };
+
+            compareFunctions[{Image::SingleChannel, Image::SingleChannel}] = [](uint8* singleChannel1, uint8* singleChannel2)
+                {
+                    return *singleChannel1 == *singleChannel2;
+                };
+        }
 
         void runTest() override
         {
             beginTest("Direct2DImageUnitTest");
 
-            compareSameFormat(Image::RGB);
-            compareSameFormat(Image::ARGB);
-            compareSameFormat(Image::SingleChannel);
+            for (auto format : formats)
+            {
+                compareSameFormat(format);
+            }
 
-            testRGBToARGBConversion();
+            testFormatConversion();
         }
 
         Rectangle<int> randomRectangleWithin(Rectangle<int> container) const noexcept
         {
-            auto x = getRandom().nextInt(container.getWidth() - 1);
-            auto y = getRandom().nextInt(container.getHeight() - 1);
-            auto h = getRandom().nextInt(container.getHeight() - x);
-            auto w = getRandom().nextInt(container.getWidth() - y);
+            auto x = getRandom().nextInt(container.getWidth() - 2);
+            auto y = getRandom().nextInt(container.getHeight() - 2);
+            auto w = getRandom().nextInt(container.getHeight() - x);
+            auto h = getRandom().nextInt(container.getWidth() - y);
+            h = jmax(h, 1);
+            w = jmax(w, 1);
             return Rectangle<int>{ x, y, w, h };
         }
 
@@ -385,15 +451,24 @@ namespace juce
 
             auto direct2DImage = NativeImageType{}.convert(softwareImage);
 
-            compareImages(softwareImage, direct2DImage);
+            compareImages(softwareImage, direct2DImage, compareFunctions[{ softwareImage.getFormat(), direct2DImage.getFormat()} ]);
             checkReadWriteModes(softwareImage);
             checkReadWriteModes(direct2DImage);
         }
 
-        void compareImages(Image& image1, Image& image2,
-            std::function<bool(Colour, Colour)> compareColors =
-            [](Colour a, Colour b) { return a == b; })
+        void compareImages(Image& image1, Image& image2, std::function<bool(uint8*, uint8*)> compareBytes)
         {
+            {
+                //
+                // BitmapData width & height should match
+                //
+                Rectangle<int> area = randomRectangleWithin(image1.getBounds());
+                Image::BitmapData data1{ image1, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+                Image::BitmapData data2{ image2, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
+
+                expect(data1.width == data2.width);
+                expect(data1.height == data2.height);
+            }
 
             {
                 //
@@ -402,14 +477,17 @@ namespace juce
                 Image::BitmapData data1{ image1, Image::BitmapData::ReadWriteMode::readOnly };
                 Image::BitmapData data2{ image2, Image::BitmapData::ReadWriteMode::readOnly };
 
-                expect(data1.width == data2.width);
-                expect(data1.height == data2.height);
-
-                for (int x = 0; x < data1.width; ++x)
+                for (int y = 0; y < data1.height; ++y)
                 {
-                    for (int y = 0; y < data1.height; ++y)
+                    auto line1 = data1.getLinePointer(y);
+                    auto line2 = data2.getLinePointer(y);
+
+                    for (int x = 0; x < data1.width; ++x)
                     {
-                        expect(compareColors(data1.getPixelColour(x, y), data2.getPixelColour(x, y)));
+                        expect(compareBytes(line1, line2), "Failed comparing format " + String{ image1.getFormat() } + " to " + String{ image2.getFormat() });
+
+                        line1 += data1.pixelStride;
+                        line2 += data2.pixelStride;
                     }
                 }
             }
@@ -426,37 +504,22 @@ namespace juce
                 Image::BitmapData data2a{ image2, area1.getX(), area1.getY(), area1.getWidth(), area1.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
                 Image::BitmapData data2b{ image2, area2.getX(), area2.getY(), area2.getWidth(), area2.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
 
-                for (int x = 0; x < data1.width; ++x)
+                auto compareSubsection = [&](Image::BitmapData& subsection1, Image::BitmapData& subsection2, Rectangle<int> area)
                 {
-                    for (int y = 0; y < data1.height; ++y)
+                    for (int y = 0; y < area.getHeight(); ++y)
                     {
-                        if (area1.contains(x, y))
-                        {
-                            auto a = data1.getPixelColour(x, y);
-                            auto b = data2a.getPixelColour(x - area1.getX(), y - area1.getY());
-                            expect(compareColors(a, b));
-                        }
+                        auto line1 = subsection1.getLinePointer(y + area.getY());
+                        auto line2 = subsection2.getLinePointer(y);
 
-                        if (area2.contains(x, y))
+                        for (int x = 0; x < area.getWidth(); ++x)
                         {
-                            auto a = data1.getPixelColour(x, y);
-                            auto b = data2a.getPixelColour(x - area2.getX(), y - area2.getY());
-                            expect(compareColors(a, b));
+                            expect(compareBytes(line1 + (x + area.getX()) * subsection1.pixelStride, line2 + x * subsection2.pixelStride));
                         }
                     }
-                }
-            }
+                };
 
-            {
-                //
-                // BitmapData width & height should match
-                //
-                Rectangle<int> area = randomRectangleWithin(image1.getBounds());
-                Image::BitmapData data1{ image1, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-                Image::BitmapData data2{ image2, area.getX(), area.getY(), area.getWidth(), area.getHeight(), Image::BitmapData::ReadWriteMode::readOnly };
-
-                expect(data1.width == data2.width);
-                expect(data1.height == data2.height);
+                compareSubsection(data1, data2a, area1);
+                compareSubsection(data1, data2b, area2);
             }
         }
 
@@ -507,30 +570,30 @@ namespace juce
             }
         }
 
-        void testRGBToARGBConversion()
+        void testFormatConversion()
         {
-            auto softwareRGBImage = Image{ SoftwareImageType{}.create(Image::RGB, 100, 100, true) };
+            for (auto sourceFormat : formats)
             {
-                Graphics g{ softwareRGBImage };
-                g.fillCheckerBoard(softwareRGBImage.getBounds().toFloat(), 21.0f, 21.0f, makeRandomColor(), makeRandomColor());
-            }
-            auto softwareARGBImage = softwareRGBImage.convertedToFormat(Image::ARGB);
-
-            auto compareRGBToARGB = [](Colour c1, Colour c2)
+                for (auto destFormat : formats)
                 {
-                    return c1.getARGB() == c2.withAlpha((uint8)255).getARGB();
-                };
+                    auto softwareStartImage = Image{ SoftwareImageType{}.create(sourceFormat, 100, 100, true) };
+                    {
+                        Graphics g{ softwareStartImage };
+                        g.fillCheckerBoard(softwareStartImage.getBounds().toFloat(), 21.0f, 21.0f, makeRandomColor(), makeRandomColor());
+                    }
+                    auto convertedSoftwareImage = softwareStartImage.convertedToFormat(destFormat);
 
-            compareImages(softwareRGBImage, softwareARGBImage, compareRGBToARGB);
+                    compareImages(softwareStartImage, convertedSoftwareImage, compareFunctions[{sourceFormat, destFormat}]);
 
-            auto direct2DRGBImage = NativeImageType{}.convert(softwareRGBImage);
+                    auto direct2DImage = NativeImageType{}.convert(softwareStartImage);
 
-            compareImages(softwareRGBImage, direct2DRGBImage);
+                    compareImages(softwareStartImage, direct2DImage, compareFunctions[{ sourceFormat, sourceFormat }]);
 
-            auto direct2DARGBImage = direct2DRGBImage.convertedToFormat(Image::ARGB);
+                    auto convertedDirect2DImage = direct2DImage.convertedToFormat(destFormat);
 
-            compareImages(softwareRGBImage, direct2DARGBImage, compareRGBToARGB);
-            compareImages(softwareARGBImage, direct2DARGBImage);
+                    compareImages(softwareStartImage, convertedDirect2DImage, compareFunctions[{ sourceFormat, destFormat }]);
+                }
+            }
         }
 
         Colour makeRandomColor()
@@ -542,6 +605,9 @@ namespace juce
             uint8 alpha = (uint8)random.nextInt(255);
             return Colour{ red, green, blue, alpha };
         }
+
+        std::array<Image::PixelFormat, 3> const formats{ Image::RGB, Image::ARGB, Image::SingleChannel };
+        std::map<std::pair<Image::PixelFormat, Image::PixelFormat>, std::function<bool(uint8*, uint8*)>> compareFunctions;
     };
 
     static Direct2DImageUnitTest direct2DImageUnitTest;

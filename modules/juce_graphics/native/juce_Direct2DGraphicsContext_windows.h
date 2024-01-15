@@ -39,6 +39,7 @@ struct PaintStats : public ReferenceCountedObject
         createGeometryTime,
         createFilledGRTime,
         createStrokedGRTime,
+        createGradientTime,
 
         numStats
     };
@@ -46,7 +47,7 @@ struct PaintStats : public ReferenceCountedObject
     StringArray const accumulatorNames { "messageThreadPaintDuration", "frameInterval",          "presentDuration",
                                          "present1Duration",           "swapChainEventInterval", "swapChainMessageTransitTime",
                                          "swapChainMessageInterval",   "VBlank to BeginDraw",
-                                         "Create geometry", "Create filled GR", "Create stroked GR" };
+                                         "Create geometry", "Create filled GR", "Create stroked GR", "Create gradient" };
 
     int64 const  creationTime        = Time::getMillisecondCounter();
     double const millisecondsPerTick = 1000.0 / (double) Time::getHighResolutionTicksPerSecond();
@@ -234,7 +235,7 @@ public:
     }
 
 #if JUCE_DIRECT2D_METRICS
-    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats;
+    direct2d::PaintStats::Ptr paintStats;
 #endif
 
     //==============================================================================
@@ -247,6 +248,8 @@ public:
 
     //==============================================================================
 protected:
+    int frameNumber = 0;
+
     struct SavedState;
     SavedState* currentState = nullptr;
 

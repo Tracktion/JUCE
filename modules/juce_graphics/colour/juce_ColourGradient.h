@@ -208,6 +208,7 @@ public:
     bool operator== (const ColourGradient&) const noexcept;
     bool operator!= (const ColourGradient&) const noexcept;
 
+    uint64 getHash() const noexcept;
 
 private:
     //==============================================================================

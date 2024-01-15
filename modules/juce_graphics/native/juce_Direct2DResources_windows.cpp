@@ -33,8 +33,6 @@
 
 #endif
 
-#define JUCE_DIRECT2D_DIRECT_COMPOSITION 1
-
 namespace juce
 {
     namespace direct2d
@@ -116,15 +114,30 @@ namespace juce
         class Direct2DBitmap
         {
         public:
-            static Direct2DBitmap fromImage(Image const& image, ID2D1DeviceContext1* deviceContext, Image::PixelFormat format)
+            static Direct2DBitmap fromImage(Image const& image, ID2D1DeviceContext1* deviceContext, Image::PixelFormat outputFormat)
             {
-                auto              convertedImage = image.convertedToFormat(format);
-                Image::BitmapData bitmapData{ convertedImage, Image::BitmapData::readOnly };
+                jassert(outputFormat == Image::ARGB || outputFormat == Image::SingleChannel);
+
+                //
+                // Calling Image::convertedToFormat could cause unchecked recursion since convertedToFormat
+                // calls Graphics::drawImageAt which calls Direct2DGraphicsContext::drawImage which calls this function...
+                //
+                // Use a software image for the conversion instead so the Graphics::drawImageAt call doesn't go
+                // through the Direct2D renderer
+                //
+                // Be sure to explicitly set the DPI to 96.0 for the image; otherwise it will default to the screen DPI
+                // and may be scaled incorrectly
+                //
+                Image convertedImage = SoftwareImageType{}.convert(image).convertedToFormat(outputFormat);
+                Image::BitmapData bitmapData{ convertedImage, Image::BitmapData::readWrite };
 
                 D2D1_BITMAP_PROPERTIES1 bitmapProperties{};
                 bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
                 bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-                switch (format)
+                bitmapProperties.dpiX = USER_DEFAULT_SCREEN_DPI;
+                bitmapProperties.dpiY = USER_DEFAULT_SCREEN_DPI;
+
+                switch (outputFormat)
                 {
                 case Image::RGB:
                     bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
@@ -160,7 +173,7 @@ namespace juce
                 if (! bitmap)
                 {
                     D2D1_BITMAP_PROPERTIES1 bitmapProperties = {};
-                    bitmapProperties.dpiX = dpiScaleFactor * USER_DEFAULT_SCREEN_DPI;;
+                    bitmapProperties.dpiX = dpiScaleFactor * USER_DEFAULT_SCREEN_DPI;
                     bitmapProperties.dpiY = bitmapProperties.dpiX;
                     bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
                     bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -194,12 +207,12 @@ namespace juce
                 }
             }
 
-            void set(ID2D1Bitmap1* bitmap_)
+            void setD2D1Bitmap(ID2D1Bitmap1* bitmap_)
             {
                 bitmap = bitmap_;
             }
 
-            ID2D1Bitmap1* get() const noexcept
+            ID2D1Bitmap1* getD2D1Bitmap() const noexcept
             {
                 return bitmap;
             }
@@ -247,24 +260,6 @@ namespace juce
                 // Direct2D default flattening tolerance is 0.25
                 //
                 return 0.25f / scaleFactor;
-            }
-
-            //==============================================================================
-            //
-            // Hashing
-            //
-            static constexpr auto fnvOffsetBasis = 0xcbf29ce484222325;
-            static constexpr auto fnvPrime = 0x100000001b3;
-
-            static constexpr uint64 fnv1aHash(uint8 const* data, size_t numBytes, uint64 hash = fnvOffsetBasis)
-            {
-                while (numBytes > 0)
-                {
-                    hash = (hash ^ *data++) * fnvPrime;
-                    --numBytes;
-                }
-
-                return hash;
             }
 
             //==============================================================================
@@ -368,7 +363,8 @@ namespace juce
             ID2D1GeometryRealization* getGeometryRealisation(const Path& path,
                 ID2D1Factory2* factory,
                 ID2D1DeviceContext1* deviceContext,
-                float dpiScaleFactor)
+                float dpiScaleFactor,
+                [[maybe_unused]] int frameNumber)
             {
                 if (path.getModificationCount() == 0 || !path.isCacheEnabled() || !path.shouldBeCached())
                 {
@@ -386,7 +382,11 @@ namespace juce
                         cachedGeometry->pathModificationCount = 0;
                     }
 
-                    if (!cachedGeometry->geometryRealisation)
+                    if (cachedGeometry->geometryRealisation)
+                    {
+                        TRACE_LOG_D2D_PAINT_CALL(etw::filledGeometryRealizationCacheHit, frameNumber);
+                    }
+                    else
                     {
 #if JUCE_DIRECT2D_METRICS
                         auto t1 = Time::getHighResolutionTicks();
@@ -410,6 +410,8 @@ namespace juce
                             {
                             case S_OK:
                                 cachedGeometry->pathModificationCount = path.getModificationCount();
+
+                                TRACE_LOG_D2D_PAINT_CALL(etw::filledGeometryRealizationCreated, frameNumber);
                                 break;
 
                             case E_OUTOFMEMORY:
@@ -433,7 +435,7 @@ namespace juce
 
             uint64 calculatePathHash(Path const& path, float flatteningTolerance)
             {
-                return fnv1aHash(reinterpret_cast<uint8 const*>(&flatteningTolerance), sizeof(flatteningTolerance), path.getUniqueID());
+                return DefaultHashFunctions::generateHash(reinterpret_cast<uint8 const*>(&flatteningTolerance), sizeof(flatteningTolerance), path.getUniqueID());
             }
 
         };
@@ -449,7 +451,8 @@ namespace juce
                 ID2D1DeviceContext1* deviceContext,
                 float xScaleFactor,
                 float yScaleFactor,
-                float dpiScaleFactor)
+                float dpiScaleFactor,
+                [[maybe_unused]] int frameNumber)
             {
                 if (path.getModificationCount() == 0 || !path.isCacheEnabled() || !path.shouldBeCached())
                 {
@@ -467,7 +470,11 @@ namespace juce
                         cachedGeometry->pathModificationCount = 0;
                     }
 
-                    if (!cachedGeometry->geometryRealisation)
+                    if (cachedGeometry->geometryRealisation)
+                    {
+                        TRACE_LOG_D2D_PAINT_CALL(etw::strokedGeometryRealizationCacheHit, frameNumber);
+                    }
+                    else
                     {
 #if JUCE_DIRECT2D_METRICS
                         auto t1 = Time::getHighResolutionTicks();
@@ -502,6 +509,8 @@ namespace juce
                                 {
                                 case S_OK:
                                     cachedGeometry->pathModificationCount = path.getModificationCount();
+
+                                    TRACE_LOG_D2D_PAINT_CALL(etw::strokedGeometryRealizationCreated, frameNumber);
                                     break;
 
                                 case E_OUTOFMEMORY:
@@ -534,10 +543,203 @@ namespace juce
                 extraHashData.jointStyle = (int8)strokeType.getJointStyle();
                 extraHashData.endStyle = (int8)strokeType.getEndStyle();
 
-                return fnv1aHash(reinterpret_cast<uint8 const*>(&extraHashData), sizeof(extraHashData), path.getUniqueID());
+                return DefaultHashFunctions::generateHash(reinterpret_cast<uint8 const*>(&extraHashData), sizeof(extraHashData), path.getUniqueID());
             }
         };
 
+
+        //==============================================================================
+        //
+        // Colour gradient caching
+        //
+
+        template<class BrushType>
+        class ColourGradientCache
+        {
+        public:
+            ~ColourGradientCache()
+            {
+                release();
+            }
+
+            void release()
+            {
+                gradientMap.clear();
+            }
+
+            void get(ColourGradient const&, float, ID2D1DeviceContext1*, ComSmartPtr<BrushType>&);
+
+#if JUCE_DIRECT2D_METRICS
+            StatisticsAccumulator<double>* createGradientMsecStats = nullptr;
+#endif
+
+        protected:
+
+            uint64 calculateGradientHash(ColourGradient const& gradient)
+            {
+                return gradient.getHash();
+            }
+
+            void makeGradientStopCollection(ColourGradient const& gradient, ID2D1DeviceContext1* deviceContext, ComSmartPtr<ID2D1GradientStopCollection>& gradientStops) const noexcept
+            {
+                const int numColors = gradient.getNumColours();
+
+                HeapBlock<D2D1_GRADIENT_STOP> stops(numColors);
+
+                for (int i = numColors; --i >= 0;)
+                {
+                    stops[i].color = direct2d::colourToD2D(gradient.getColour(i));
+                    stops[i].position = (FLOAT)gradient.getColourPosition(i);
+                }
+
+                deviceContext->CreateGradientStopCollection(stops.getData(), (UINT32)numColors, gradientStops.resetAndGetPointerAddress());
+            }
+
+            class HashMap
+            {
+            public:
+                ~HashMap()
+                {
+                    clear();
+                }
+
+                void clear()
+                {
+                    lruCache.clear();
+                }
+
+                auto size() const noexcept
+                {
+                    return lruCache.size();
+                }
+
+                void getCachedBrush(uint64 hash, ComSmartPtr<BrushType>& brush)
+                {
+                    trim();
+
+                    brush = lruCache.get(hash);
+                }
+
+                void store(uint64 hash, ComSmartPtr<BrushType>& brush)
+                {
+                    lruCache.set(hash, brush);
+                }
+
+                void trim()
+                {
+                    //
+                    // Remove any expired entries
+                    //
+                    while (lruCache.size() > maxNumCacheEntries)
+                    {
+                        lruCache.popBack();
+                    }
+                }
+
+            private:
+                static int constexpr maxNumCacheEntries = 128;
+
+                direct2d::LeastRecentlyUsedCache<uint64, ComSmartPtr<BrushType>> lruCache;
+            };
+
+            HashMap gradientMap;
+        };
+
+        template<>
+        void ColourGradientCache<ID2D1LinearGradientBrush>::get(ColourGradient const& gradient, float opacity, ID2D1DeviceContext1* deviceContext, ComSmartPtr<ID2D1LinearGradientBrush>& brush)
+        {
+            jassert(!gradient.isRadial);
+
+            //
+            // Already cached?
+            //
+            const auto p1 = gradient.point1;
+            const auto p2 = gradient.point2;
+
+            auto hash = calculateGradientHash(gradient);
+            if (gradientMap.getCachedBrush(hash, brush); brush != nullptr)
+            {
+                brush->SetOpacity(opacity);
+                brush->SetStartPoint({ p1.x, p1.y });
+                brush->SetEndPoint({ p2.x, p2.y });
+                return;
+            }
+
+#if JUCE_DIRECT2D_METRICS
+            auto t1 = Time::getHighResolutionTicks();
+#endif
+
+            //
+            // Make and store a new gradient brush
+            //
+            ComSmartPtr<ID2D1GradientStopCollection> gradientStops;
+            makeGradientStopCollection(gradient, deviceContext, gradientStops);
+
+            D2D1_BRUSH_PROPERTIES brushProps = { opacity, D2D1::IdentityMatrix() };
+            const auto linearGradientBrushProperties = D2D1::LinearGradientBrushProperties({ p1.x, p1.y }, { p2.x, p2.y });
+
+            deviceContext->CreateLinearGradientBrush(linearGradientBrushProperties,
+                brushProps,
+                gradientStops,
+                brush.resetAndGetPointerAddress());
+
+           gradientMap.store(hash, brush);
+
+#if JUCE_DIRECT2D_METRICS
+            auto t2 = Time::getHighResolutionTicks();
+
+            if (createGradientMsecStats) createGradientMsecStats->addValue(Time::highResolutionTicksToSeconds(t2 - t1) * 1000.0);
+#endif
+        }
+
+        template<>
+        void ColourGradientCache<ID2D1RadialGradientBrush>::get(ColourGradient const& gradient, float opacity, ID2D1DeviceContext1* deviceContext, ComSmartPtr<ID2D1RadialGradientBrush>& brush)
+        {
+            jassert(gradient.isRadial);
+
+            //
+            // Already cached?
+            //
+            const auto p1 = gradient.point1;
+            const auto p2 = gradient.point2;
+            const auto r = p1.getDistanceFrom(p2);
+
+            auto hash = calculateGradientHash(gradient);
+            if (gradientMap.getCachedBrush(hash, brush); brush != nullptr)
+            {
+                brush->SetOpacity(opacity);
+                brush->SetCenter({ p1.x, p1.y });
+                brush->SetRadiusX(r);
+                brush->SetRadiusY(r);
+                return;
+            }
+
+#if JUCE_DIRECT2D_METRICS
+            auto t1 = Time::getHighResolutionTicks();
+#endif
+
+            //
+            // Make and store a new gradient brush
+            //
+            ComSmartPtr<ID2D1GradientStopCollection> gradientStops;
+            makeGradientStopCollection(gradient, deviceContext, gradientStops);
+
+            D2D1_BRUSH_PROPERTIES brushProps = { opacity, D2D1::IdentityMatrix() };
+            const auto radialGradientBrushProperties = D2D1::RadialGradientBrushProperties({ p1.x, p1.y }, {}, r, r);
+
+            deviceContext->CreateRadialGradientBrush(radialGradientBrushProperties,
+                brushProps,
+                gradientStops,
+                brush.resetAndGetPointerAddress());
+
+            gradientMap.store(hash, brush);
+
+#if JUCE_DIRECT2D_METRICS
+            auto t2 = Time::getHighResolutionTicks();
+
+            if (createGradientMsecStats) createGradientMsecStats->addValue(Time::highResolutionTicksToSeconds(t2 - t1) * 1000.0);
+#endif
+        }
 
         //==============================================================================
         //
@@ -570,29 +772,31 @@ namespace juce
                 }
 
                 if (deviceContext.context == nullptr)
-                    {
-                        hr = adapter->direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
-                            deviceContext.context.resetAndGetPointerAddress());
+                {
+                    hr = adapter->direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+                        deviceContext.context.resetAndGetPointerAddress());
                     if (FAILED(hr)) return hr;
-                    }
+                }
 
-                        deviceContext.context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+                deviceContext.context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
 
-                        float dpi = (float)(USER_DEFAULT_SCREEN_DPI * dpiScalingFactor);
-                        deviceContext.context->SetDpi(dpi, dpi);
+                float dpi = (float)(USER_DEFAULT_SCREEN_DPI * dpiScalingFactor);
+                deviceContext.context->SetDpi(dpi, dpi);
 
-                        if (colourBrush == nullptr)
-                        {
-                            hr = deviceContext.context->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f),
-                                colourBrush.resetAndGetPointerAddress());
-                            jassertquiet(SUCCEEDED(hr));
-                        }
+                if (colourBrush == nullptr)
+                {
+                    hr = deviceContext.context->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f),
+                        colourBrush.resetAndGetPointerAddress());
+                    jassertquiet(SUCCEEDED(hr));
+                }
 
                 return hr;
             }
 
             void release()
             {
+                linearGradientCache.release();
+                radialGradientCache.release();
                 filledGeometryCache.release();
                 strokedGeometryCache.release();
                 colourBrush = nullptr;
@@ -608,6 +812,8 @@ namespace juce
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
             FilledGeometryCache               filledGeometryCache;
             StrokeGeometryCache               strokedGeometryCache;
+            ColourGradientCache<ID2D1LinearGradientBrush> linearGradientCache;
+            ColourGradientCache<ID2D1RadialGradientBrush> radialGradientCache;
         };
 
         //==============================================================================

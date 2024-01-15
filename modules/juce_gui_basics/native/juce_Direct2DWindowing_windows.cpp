@@ -151,6 +151,9 @@ private:
     #if JUCE_ETW_TRACELOGGING
     SharedResourcePointer<ETWEventProvider> etwEventProvider;
     #endif
+#if JUCE_DIRECT2D_METRICS
+    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats{};
+#endif
     std::unique_ptr<Direct2DHwndContext> direct2DContext;
 
     void handlePaintMessage() override
@@ -168,10 +171,10 @@ private:
         HWNDComponentPeer::handlePaintMessage();
 
     #if JUCE_DIRECT2D_METRICS
-        if (lastPaintStartTicks > 0 && direct2DContext)
+        if (lastPaintStartTicks > 0 && paintStats)
         {
-            direct2DContext->paintStats->addValueTicks (direct2d::PaintStats::frameInterval, paintStartTicks - lastPaintStartTicks);
-            direct2DContext->paintStats->addValueTicks (direct2d::PaintStats::messageThreadPaintDuration, Time::getHighResolutionTicks() - paintStartTicks);
+            paintStats->addValueTicks (direct2d::PaintStats::frameInterval, paintStartTicks - lastPaintStartTicks);
+            paintStats->addValueTicks (direct2d::PaintStats::messageThreadPaintDuration, Time::getHighResolutionTicks() - paintStartTicks);
         }
         lastPaintStartTicks = paintStartTicks;
     #endif
@@ -312,6 +315,8 @@ private:
 
 #if JUCE_DIRECT2D_METRICS
                 {
+                    direct2DContext->paintStats = paintStats;
+
                     var direct2DVar{ new DynamicObject };
                     direct2DVar.getDynamicObject()->setProperty("Metrics", direct2DContext->paintStats.get());
                     component.getProperties().set("Direct2D", direct2DVar);
@@ -361,8 +366,6 @@ private:
 
         if (usingDirect2DRendering())
         {
-            TRACE_LOG_PARENT_WINDOW_MESSAGE(message);
-
             switch (message)
             {
             case WM_PAINT:

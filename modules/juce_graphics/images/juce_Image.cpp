@@ -124,7 +124,7 @@ Image ImageType::convertFromBitmapData (Image::BitmapData const& src) const
     if (src.pixelStride == dest.pixelStride && src.pixelFormat == dest.pixelFormat)
     {
         for (int y = 0; y < dest.height; ++y)
-            memcpy (dest.getLinePointer (y), src.getLinePointer (y), (size_t) dest.lineStride);
+            memcpy (dest.getLinePointer (y), src.getLinePointer (y), (size_t) dest.pixelStride * (size_t)dest.width);
     }
     else
     {
@@ -328,37 +328,7 @@ Image Image::rescaled (int newWidth, int newHeight, Graphics::ResamplingQuality 
     return newImage;
 }
 
-template<class sourcePixelType, class destinationPixelType> void convertBitmapData(const Image& source, Image& destination)
-{
-    const Image::BitmapData srcData(source, 0, 0, source.getWidth(), source.getHeight());
-    const Image::BitmapData destData(destination, 0, 0, destination.getWidth(), destination.getHeight(), Image::BitmapData::writeOnly);
-
-    for (int y = 0; y < destData.height; ++y)
-    {
-        auto src = reinterpret_cast<const sourcePixelType*> (srcData.getLinePointer(y));
-        auto dst = reinterpret_cast<destinationPixelType*> (destData.getLinePointer(y));
-
-        for (int x = 0; x < destData.width; ++x)
-            dst[x].set(src[x]);
-    }
-}
-
-template<> void convertBitmapData<PixelAlpha, PixelARGB>(const Image& source, Image& destination)
-{
-    const Image::BitmapData srcData(source, 0, 0, source.getWidth(), source.getHeight());
-    const Image::BitmapData destData(destination, 0, 0, destination.getWidth(), destination.getHeight(), Image::BitmapData::writeOnly);
-
-    for (int y = 0; y < destData.height; ++y)
-    {
-        auto src = reinterpret_cast<const PixelARGB*> (srcData.getLinePointer(y));
-        auto dst = destData.getLinePointer(y);
-
-        for (int x = 0; x < destData.width; ++x)
-            dst[x] = src[x].getAlpha();
-    }
-}
-
-Image Image::convertedToFormat(PixelFormat newFormat) const
+Image Image::convertedToFormat (PixelFormat newFormat) const
 {
     if (image == nullptr || newFormat == image->pixelFormat)
         return *this;
@@ -368,86 +338,62 @@ Image Image::convertedToFormat(PixelFormat newFormat) const
     auto type = image->createType();
     Image newImage (type->create (newFormat, w, h, false));
 
-    /*
-                   |                |
-    Source format  | New format     |
-    ---------------|----------------|---------------------------------------------------------------
-    SingleChannel  | SingleChannel  | N/A  Fill black
-    SingleChannel  | RGB            | Fill 255 alpha
-    SingleChannel  | ARGB           | Copy alpha values
-
-    RGB            | SingleChannel  | Fill 255 alpha
-    RGB            | RGB            | N/A
-    RGB            | ARGB           | Copy RGB values with 255 alpha
-
-    ARGB           | SingleChannel  | Copy alpha values
-    ARGB           | RGB            | Copy RGB values
-    ARGB           | ARGB           | N/A
-
-    */
-
-    switch (newFormat)
+    if (newFormat == SingleChannel)
     {
-    case SingleChannel:
-    {
-        if (!hasAlphaChannel())
+        if (! hasAlphaChannel())
         {
             //
             // RGB -> SingleChannel
             //
-            newImage.clear(getBounds(), Colours::black);
+            newImage.clear (getBounds(), Colours::black);
         }
         else
         {
             //
             // ARGB -> SingleChannel
             //
-            convertBitmapData<PixelAlpha, PixelARGB>(*this, newImage);
-        }
-        break;
-    }
+            const BitmapData destData (newImage, 0, 0, w, h, BitmapData::writeOnly);
+            const BitmapData srcData (*this, 0, 0, w, h);
 
-    case RGB:
+            for (int y = 0; y < h; ++y)
+            {
+                auto src = reinterpret_cast<const PixelARGB*> (srcData.getLinePointer (y));
+                auto dst = destData.getLinePointer (y);
+
+                for (int x = 0; x < w; ++x)
+                    dst[x] = src[x].getAlpha();
+            }
+        }
+    }
+    else if (image->pixelFormat == SingleChannel && newFormat == Image::ARGB)
     {
-        newImage.clear(getBounds());
+        //
+        // SingleChannel -> ARGB
+        //
+        const BitmapData destData (newImage, 0, 0, w, h, BitmapData::writeOnly);
+        const BitmapData srcData (*this, 0, 0, w, h);
 
-        if (image->pixelFormat == ARGB)
+        for (int y = 0; y < h; ++y)
         {
-            //
-            // ARGB -> RGB
-            //
-            convertBitmapData<PixelARGB, PixelRGB>(*this, newImage);
-        }
-        break;
-    }
+            auto src = reinterpret_cast<const PixelAlpha*> (srcData.getLinePointer (y));
+            auto dst = reinterpret_cast<PixelARGB*> (destData.getLinePointer (y));
 
-    case ARGB:
+            for (int x = 0; x < w; ++x)
+                dst[x].set (src[x]);
+        }
+    }
+    else
     {
-        if (image->pixelFormat == SingleChannel)
-        {
-            //
-            // SingleChannel -> ARGB
-            //
-            convertBitmapData<PixelAlpha, PixelARGB>(*this, newImage);
-        }
-        else
-        {
-            //
-            // RGB -> ARGB
-            //
-            newImage.clear(getBounds());
+        //
+        // SingleChannel-> RGB
+        // RGB -> ARGB
+        // ARGB -> RGB
+        //
+        if (hasAlphaChannel())
+            newImage.clear (getBounds());
 
-            convertBitmapData<PixelRGB, PixelARGB>(*this, newImage);
-        }
-        break;
-    }
-
-    case UnknownFormat:
-    default:
-    {
-        jassertfalse;
-        break;
-    }
+        Graphics g (newImage);
+        g.drawImageAt (*this, 0, 0);
     }
 
     return newImage;

@@ -45,6 +45,20 @@ struct DefaultHashFunctions
     static int generateHash (const void* key, int upperLimit) noexcept      { return generateHash ((uint64) (pointer_sized_uint) key, upperLimit); }
     /** Generates a simple hash from a UUID. */
     static int generateHash (const Uuid& key, int upperLimit) noexcept      { return generateHash (key.hash(), upperLimit); }
+    /** Generates a standard FNV1a hash from a block of data */
+    static constexpr auto fnvOffsetBasis = 0xcbf29ce484222325;
+    static constexpr uint64 generateHash(uint8 const* data, size_t numBytes, uint64 hash = fnvOffsetBasis)
+    {
+        constexpr auto fnvPrime = 0x100000001b3;
+
+        while (numBytes > 0)
+        {
+            hash = (hash ^ *data++) * fnvPrime;
+            --numBytes;
+        }
+
+        return hash;
+    }
 };
 
 

@@ -150,8 +150,7 @@ public:
     Direct2DPixelData(ReferenceCountedObjectPtr<Direct2DPixelData> source_, Rectangle<int> clipArea_, DirectX::DXGI::Adapter::Ptr adapter_ = nullptr);
     Direct2DPixelData(Image::PixelFormat formatToUse, direct2d::DPIScalableArea<int> area_, bool clearImage_, ID2D1Bitmap1* d2d1Bitmap, DirectX::DXGI::Adapter::Ptr adapter_ = nullptr);
 
-    static ReferenceCountedObjectPtr<Direct2DPixelData> fromDirect2DBitmap(ID2D1Bitmap1* const bitmap,
-        direct2d::DPIScalableArea<int> area);
+    static ReferenceCountedObjectPtr<Direct2DPixelData> fromDirect2DBitmap(ID2D1Bitmap1* const bitmap, direct2d::DPIScalableArea<int> area);
 
     ~Direct2DPixelData() override;
 
@@ -337,7 +336,7 @@ private:
     SharedResourcePointer<DirectX> directX;
     DirectX::DXGI::Adapter::Ptr imageAdapter;
     direct2d::DeviceResources deviceResources;
-    direct2d::DPIScalableArea<int> area;
+    direct2d::DPIScalableArea<int> bitmapArea;
     const int                 pixelStride, lineStride;
     bool const                clearImage;
     AdapterBitmap adapterBitmap;

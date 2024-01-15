@@ -33,8 +33,6 @@
 
 #endif
 
-#define JUCE_DIRECT2D_DIRECT_COMPOSITION 1
-
 namespace juce
 {
 namespace direct2d

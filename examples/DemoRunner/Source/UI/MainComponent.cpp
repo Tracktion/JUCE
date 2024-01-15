@@ -283,7 +283,7 @@ MainComponent::MainComponent()
         {
            #if JUCE_MAC && USE_COREGRAPHICS_RENDERING
             setRenderingEngine (1);
-           #else
+           #elif !JUCE_WINDOWS
             setRenderingEngine (0);
            #endif
         }

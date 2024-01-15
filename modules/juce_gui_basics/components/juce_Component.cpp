@@ -1645,8 +1645,17 @@ void Component::paintOverChildren (Graphics&)
 }
 
 //==============================================================================
+#ifndef TRACE_LOG_PAINT_WITHIN_PARENT_CONTEXT
+#define TRACE_LOG_PAINT_WITHIN_PARENT_CONTEXT
+#define TRACE_LOG_PAINT_COMPONENT_AND_CHILDREN
+#define GET_COMPONENT_DEPTH
+#define TRACE_LOG_PAINT_ENTIRE_COMPONENT(...)
+#endif
+
 void Component::paintWithinParentContext (Graphics& g)
 {
+    TRACE_LOG_PAINT_WITHIN_PARENT_CONTEXT;
+
     g.setOrigin (getPosition());
 
     if (cachedImage != nullptr)
@@ -1657,6 +1666,8 @@ void Component::paintWithinParentContext (Graphics& g)
 
 void Component::paintComponentAndChildren (Graphics& g)
 {
+    TRACE_LOG_PAINT_COMPONENT_AND_CHILDREN;
+
     auto clipBounds = g.getClipBounds();
 
     if (flags.dontClipGraphicsFlag && getNumChildComponents() == 0)
@@ -1722,6 +1733,11 @@ void Component::paintComponentAndChildren (Graphics& g)
 
 void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel)
 {
+#if JUCE_ETW_TRACELOGGING && JUCE_WINDOWS
+    GET_COMPONENT_DEPTH(this);
+    TRACE_LOG_PAINT_ENTIRE_COMPONENT(componentDepth, getBounds(), g.getClipBounds());
+#endif
+
     // If sizing a top-level-window and the OS paint message is delivered synchronously
     // before resized() is called, then we'll invoke the callback here, to make sure
     // the components inside have had a chance to sort their sizes out..
