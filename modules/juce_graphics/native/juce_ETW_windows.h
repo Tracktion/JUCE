@@ -142,7 +142,7 @@ JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 #define TraceLoggingWriteWrapper(hProvider, eventName, ...) TraceLoggingWrite(hProvider, eventName, __VA_ARGS__)
 
-#define GET_COMPONENT_DEPTH(component) int componentDepth = 0; { auto c = this; while ((c = c->getParentComponent()) != nullptr) { ++componentDepth; } }
+#define GET_COMPONENT_DEPTH(component) int componentDepth = 0; { auto c = this; while ((c = c->getParentComponent())) { ++componentDepth; } }
 
 #else
 
