@@ -24,7 +24,7 @@ namespace juce
 // DirectWrite
 //
 
-DirectX::DirectWrite::DirectWrite()
+DirectWrite::DirectWrite()
 {
     JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wlanguage-extension-token")
 
@@ -40,7 +40,7 @@ DirectX::DirectWrite::DirectWrite()
     }
 }
 
-DirectX::DirectWrite::~DirectWrite()
+DirectWrite::~DirectWrite()
 {
     if (directWriteFactory != nullptr)
     {
@@ -60,7 +60,7 @@ DirectX::DirectWrite::~DirectWrite()
     systemFonts = nullptr;
 }
 
-IDWriteFontFamily* DirectX::DirectWrite::getFontFamilyForRawData(const void* data, size_t dataSize)
+IDWriteFontFamily* DirectWrite::getFontFamilyForRawData(const void* data, size_t dataSize)
 {
     //
     // Hopefully the raw data here is pointing to a TrueType font file in memory.
@@ -115,7 +115,7 @@ DirectX::Direct2D::Direct2D()
 {
     {
         D2D1_FACTORY_OPTIONS options;
-#if JUCE_DIRECTX_DEBUG
+#if JUCE_DIRECTX_DEBUG && JUCE_DEBUG
         options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #else
         options.debugLevel = D2D1_DEBUG_LEVEL_NONE;

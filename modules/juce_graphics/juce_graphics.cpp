@@ -54,7 +54,9 @@
 #if JUCE_ETW_TRACELOGGING
   #include <evntrace.h>
   #include <TraceLoggingProvider.h>
+  #include "native/juce_ETW_windows.h"
 #endif
+#include "native/juce_ETW_windows.h"
 
  #if JUCE_MINGW
   #include <malloc.h>
@@ -62,6 +64,15 @@
  #endif
 
  JUCE_END_IGNORE_WARNINGS_MSVC
+
+ #if ! JUCE_DONT_AUTOLINK_TO_WIN32_LIBRARIES
+  #pragma comment (lib, "Dwrite.lib")
+  #pragma comment (lib, "D2d1.lib")
+  #pragma comment (lib, "DXGI.lib")
+  #pragma comment (lib, "D3D11.lib")
+  #pragma comment (lib, "DComp.lib")
+  #pragma comment (lib, "dxguid.lib")
+#endif
 
 #elif JUCE_IOS
  #import <QuartzCore/QuartzCore.h>
@@ -135,7 +146,6 @@
  #include "native/juce_IconHelpers_mac.cpp"
 
 #elif JUCE_WINDOWS
- #include "native/juce_ETW_windows.h"
  #include "native/juce_DirectX_windows.h"
  #include "native/juce_DirectWriteCustomFontCollection_windows.cpp"
  #include "native/juce_DirectX_windows.cpp"

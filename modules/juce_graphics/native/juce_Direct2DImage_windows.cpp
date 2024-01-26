@@ -186,6 +186,8 @@ namespace juce
 
     void Direct2DPixelData::initialiseBitmapData(Image::BitmapData& bitmap, int x, int y, Image::BitmapData::ReadWriteMode mode)
     {
+        TRACE_LOG_D2D_IMAGE_MAP_DATA;
+
         x += deviceIndependentClipArea.getX();
         y += deviceIndependentClipArea.getY();
 
@@ -295,6 +297,72 @@ namespace juce
         return bitmapArea.getDPIScalingFactor();
     }
 
+    std::optional<Image> Direct2DPixelData::applyNativeGaussianBlurEffect(float radius)
+    {
+        ComSmartPtr<ID2D1Effect> effect;
+
+        if (deviceResources.deviceContext.context)
+        {
+            deviceResources.deviceContext.context->CreateEffect(CLSID_D2D1GaussianBlur, effect.resetAndGetPointerAddress());
+            if (effect)
+            {
+                effect->SetInput(0, getAdapterD2D1Bitmap(imageAdapter));
+                effect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, radius);
+
+                if (! effectedPixelData)
+                {
+                    effectedPixelData = new Direct2DPixelData{ pixelFormat, bitmapArea, true, imageAdapter };
+                }
+
+                if (auto effectedPixelDataContext = effectedPixelData->deviceResources.deviceContext.context)
+                {
+                    effectedPixelDataContext->SetTarget(effectedPixelData->getAdapterD2D1Bitmap(imageAdapter));
+                    effectedPixelDataContext->BeginDraw();
+                    effectedPixelDataContext->DrawImage(effect);
+                    effectedPixelDataContext->EndDraw();
+                    effectedPixelDataContext->SetTarget(nullptr);
+                }
+                return { Image{ effectedPixelData } };
+            }
+        }
+
+        return {};
+    }
+
+
+    std::optional<Image> Direct2DPixelData::applyNativeDropShadowEffect(float radius, Colour colour)
+    {
+        ComSmartPtr<ID2D1Effect> effect;
+
+        if (deviceResources.deviceContext.context)
+        {
+            deviceResources.deviceContext.context->CreateEffect(CLSID_D2D1Shadow, effect.resetAndGetPointerAddress());
+            if (effect)
+            {
+                effect->SetInput(0, getAdapterD2D1Bitmap(imageAdapter));
+                effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, radius / 6.0f);
+                effect->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1_VECTOR_4F{ colour.getFloatRed(), colour.getFloatGreen(), colour.getFloatBlue(), 1.0f });
+
+                if (!effectedPixelData)
+                {
+                    effectedPixelData = new Direct2DPixelData{ pixelFormat, bitmapArea, true, imageAdapter };
+                }
+
+                if (auto effectedPixelDataContext = effectedPixelData->deviceResources.deviceContext.context)
+                {
+                    effectedPixelDataContext->SetTarget(effectedPixelData->getAdapterD2D1Bitmap(imageAdapter));
+                    effectedPixelDataContext->BeginDraw();
+                    effectedPixelDataContext->DrawImage(effect);
+                    effectedPixelDataContext->EndDraw();
+                    effectedPixelDataContext->SetTarget(nullptr);
+                }
+                return { Image{ effectedPixelData } };
+            }
+        }
+
+        return {};
+    }
+
     std::unique_ptr<ImageType> Direct2DPixelData::createType() const
     {
         return std::make_unique<NativeImageType>(getDPIScalingFactor());
@@ -327,6 +395,8 @@ namespace juce
 
     Direct2DPixelData::Direct2DBitmapReleaser::~Direct2DBitmapReleaser()
     {
+        TRACE_LOG_D2D_IMAGE_UNMAP_DATA;
+
         mappableBitmap->unmap(pixelData.adapterBitmap.getD2D1Bitmap(), mode);
         pixelData.mappableBitmaps.removeObject(mappableBitmap);
     }
@@ -338,6 +408,19 @@ namespace juce
 
     ImagePixelData::Ptr NativeImageType::create(Image::PixelFormat format, int width, int height, bool clearImage) const
     {
+        SharedResourcePointer<DirectX> directX;
+        if (!directX->dxgi.isReady())
+        {
+            //
+            // Make sure the DXGI factory exists
+            //
+            // The caller may be trying to create an Image from a static variable; if this is a DLL, then this is
+            // probably called from DllMain. You can't create a DXGI factory from DllMain, so fall back to a
+            // software image.
+            //
+            return new SoftwarePixelData{ format, width, height, clearImage };
+        }
+
         auto area = direct2d::DPIScalableArea<int>::fromDeviceIndependentArea({ width, height }, scaleFactor);
         return new Direct2DPixelData{ format, area, clearImage };
     }

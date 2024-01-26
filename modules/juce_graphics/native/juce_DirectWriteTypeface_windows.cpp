@@ -129,7 +129,7 @@ public:
         //
         // Get the DirectWrite font family for the raw data
         //
-        auto fontFamily = directX->directWrite.getFontFamilyForRawData(data, dataSize);
+        auto fontFamily = directWrite->getFontFamilyForRawData(data, dataSize);
         if (fontFamily == nullptr)
         {
             return;
@@ -252,7 +252,7 @@ public:
     float getUnitsToHeightScaleFactor() const noexcept      { return unitsToHeightScaleFactor; }
 
 private:
-    SharedResourcePointer<DirectX> directX;
+    SharedResourcePointer<DirectWrite> directWrite;
     ComSmartPtr<IDWriteFont> dwFont;
     ComSmartPtr<IDWriteFontFace> dwFontFace;
     float unitsToHeightScaleFactor = 1.0f, heightToPointsFactor = 1.0f, ascent = 0;

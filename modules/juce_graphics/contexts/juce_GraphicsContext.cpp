@@ -19,7 +19,7 @@
 namespace juce
 {
 
-struct GraphicsFontHelpers
+    struct GraphicsFontHelpers
 {
     static auto compareFont (const Font& a, const Font& b) { return Font::compare (a, b); }
 };
@@ -153,6 +153,10 @@ Graphics::Graphics (LowLevelGraphicsContext& internalContext) noexcept
 //==============================================================================
 void Graphics::resetToDefaultState()
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::resetToDefaultState, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.setFill (FillType());
     context.setFont (Font());
@@ -166,6 +170,10 @@ bool Graphics::isVectorDevice() const
 
 bool Graphics::reduceClipRegion (Rectangle<int> area)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_RECT(etw::reduceClipRegionRectangle, context.getFrameNumber(), area, etw::graphicsKeyword)
+#endif
+
     saveStateIfPending();
     return context.clipToRectangle (area);
 }
@@ -177,12 +185,20 @@ bool Graphics::reduceClipRegion (int x, int y, int w, int h)
 
 bool Graphics::reduceClipRegion (const RectangleList<int>& clipRegion)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_RECT_LIST(etw::reduceClipRegionRectangleList, context.getFrameNumber(), clipRegion, etw::graphicsKeyword)
+#endif
+
     saveStateIfPending();
     return context.clipToRectangleList (clipRegion);
 }
 
 bool Graphics::reduceClipRegion (const Path& path, const AffineTransform& transform)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::reduceClipRegionPath, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.clipToPath (path, transform);
     return ! context.isClipEmpty();
@@ -190,6 +206,10 @@ bool Graphics::reduceClipRegion (const Path& path, const AffineTransform& transf
 
 bool Graphics::reduceClipRegion (const Image& image, const AffineTransform& transform)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::reduceClipRegionImage, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.clipToImageAlpha (image, transform);
     return ! context.isClipEmpty();
@@ -197,6 +217,10 @@ bool Graphics::reduceClipRegion (const Image& image, const AffineTransform& tran
 
 void Graphics::excludeClipRegion (Rectangle<int> rectangleToExclude)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_RECT(etw::excludeClipRegion, context.getFrameNumber(), rectangleToExclude, etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.excludeClipRectangle (rectangleToExclude);
 }
@@ -213,12 +237,20 @@ Rectangle<int> Graphics::getClipBounds() const
 
 void Graphics::saveState()
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::saveState, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     saveStatePending = true;
 }
 
 void Graphics::restoreState()
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::restoreState, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     if (saveStatePending)
         saveStatePending = false;
     else
@@ -229,6 +261,10 @@ void Graphics::saveStateIfPending()
 {
     if (saveStatePending)
     {
+#if JUCE_ETW_TRACELOGGING
+        SCOPED_TRACE_EVENT(etw::saveState, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
         saveStatePending = false;
         context.saveState();
     }
@@ -247,6 +283,10 @@ void Graphics::setOrigin (int x, int y)
 
 void Graphics::addTransform (const AffineTransform& transform)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::addTransform, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.addTransform (transform);
 }
@@ -258,12 +298,20 @@ bool Graphics::clipRegionIntersects (Rectangle<int> area) const
 
 void Graphics::beginTransparencyLayer (float layerOpacity)
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::beginTransparencyLayer, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     saveStateIfPending();
     context.beginTransparencyLayer (layerOpacity);
 }
 
 void Graphics::endTransparencyLayer()
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::endTransparencyLayer, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     context.endTransparencyLayer();
 }
 
@@ -502,42 +550,74 @@ void Graphics::drawFittedText (const String& text, int x, int y, int width, int 
 //==============================================================================
 void Graphics::fillRect (Rectangle<int> r) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_RECT(etw::fillRect, context.getFrameNumber(), r, etw::graphicsKeyword)
+#endif
+
     context.fillRect (r, false);
 }
 
 void Graphics::fillRect (Rectangle<float> r) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_FLOAT_RECT(etw::fillRect, context.getFrameNumber(), r, etw::graphicsKeyword)
+#endif
+
     context.fillRect (r);
 }
 
 void Graphics::fillRect (int x, int y, int width, int height) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_XYWH(etw::fillRect, context.getFrameNumber(), x, y, width, height, etw::graphicsKeyword)
+#endif
+
     context.fillRect (coordsToRectangle (x, y, width, height), false);
 }
 
 void Graphics::fillRect (float x, float y, float width, float height) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_FLOAT_XYWH(etw::fillRect, context.getFrameNumber(), x, y, width, height, etw::graphicsKeyword)
+#endif
+
     fillRect (coordsToRectangle (x, y, width, height));
 }
 
 void Graphics::fillRectList (const RectangleList<float>& rectangles) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_FLOAT_RECT_LIST(etw::fillRectList, context.getFrameNumber(), rectangles, etw::graphicsKeyword)
+#endif
+
     context.fillRectList (rectangles);
 }
 
 void Graphics::fillRectList (const RectangleList<int>& rects) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_INT_RECT_LIST(etw::fillRectList, context.getFrameNumber(), rects, etw::graphicsKeyword)
+#endif
+
     for (auto& r : rects)
         context.fillRect (r, false);
 }
 
 void Graphics::fillAll() const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::fillAll, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     context.fillAll();
 }
 
 void Graphics::fillAll (Colour colourToUse) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::fillAll, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     if (! colourToUse.isTransparent())
     {
         context.saveState();
@@ -551,12 +631,20 @@ void Graphics::fillAll (Colour colourToUse) const
 //==============================================================================
 void Graphics::fillPath (const Path& path) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::fillPath, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     if (! (context.isClipEmpty() || path.isEmpty()))
         context.fillPath (path, AffineTransform());
 }
 
 void Graphics::fillPath (const Path& path, const AffineTransform& transform) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::fillPath, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     if (! (context.isClipEmpty() || path.isEmpty()))
         context.fillPath (path, transform);
 }
@@ -565,6 +653,10 @@ void Graphics::strokePath (const Path& path,
                            const PathStrokeType& strokeType,
                            const AffineTransform& transform) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT(etw::strokePath, context.getFrameNumber(), etw::graphicsKeyword);
+#endif
+
     if (context.drawPath(path, strokeType, transform))
     {
         return;
@@ -593,6 +685,10 @@ void Graphics::drawRect (Rectangle<int> r, int lineThickness) const
 
 void Graphics::drawRect (Rectangle<float> r, const float lineThickness) const
 {
+#if JUCE_ETW_TRACELOGGING
+    SCOPED_TRACE_EVENT_FLOAT_RECT(etw::drawRect, context.getFrameNumber(), r, etw::graphicsKeyword);
+#endif
+
     jassert (r.getWidth() >= 0.0f && r.getHeight() >= 0.0f);
 
     if (context.drawRect(r, lineThickness))

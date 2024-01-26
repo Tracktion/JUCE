@@ -38,6 +38,7 @@ class Direct2DComponentPeer : public HWNDComponentPeer
 private:
     #if JUCE_DIRECT2D_METRICS
     int64 lastPaintStartTicks = 0;
+    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats;
     #endif
 
 public:
@@ -151,9 +152,6 @@ private:
     #if JUCE_ETW_TRACELOGGING
     SharedResourcePointer<ETWEventProvider> etwEventProvider;
     #endif
-#if JUCE_DIRECT2D_METRICS
-    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats{};
-#endif
     std::unique_ptr<Direct2DHwndContext> direct2DContext;
 
     void handlePaintMessage() override
@@ -276,6 +274,16 @@ private:
                 nullptr,
                 nullptr,
                 RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+
+#if JUCE_DIRECT2D_METRICS
+            {
+                paintStats = new direct2d::PaintStats;
+
+                var direct2DVar{ new DynamicObject };
+                direct2DVar.getDynamicObject()->setProperty("Metrics", paintStats.get());
+                component.getProperties().set("Direct2D", direct2DVar);
+            }
+#endif
             break;
         }
 
@@ -320,6 +328,8 @@ private:
                     var direct2DVar{ new DynamicObject };
                     direct2DVar.getDynamicObject()->setProperty("Metrics", direct2DContext->paintStats.get());
                     component.getProperties().set("Direct2D", direct2DVar);
+
+                    paintStats = nullptr;
                 }
 #endif
             }

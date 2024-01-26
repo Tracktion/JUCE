@@ -168,6 +168,9 @@ public:
 
     float getDPIScalingFactor() const noexcept;
 
+    std::optional<Image> applyNativeGaussianBlurEffect(float radius) override;
+    std::optional<Image> applyNativeDropShadowEffect(float radius, Colour color) override;
+
     std::unique_ptr<ImageType> createType() const override;
 
     using Ptr = ReferenceCountedObjectPtr<Direct2DPixelData>;
@@ -341,6 +344,7 @@ private:
     bool const                clearImage;
     AdapterBitmap adapterBitmap;
     ReferenceCountedArray<MappableBitmap> mappableBitmaps;
+    Direct2DPixelData::Ptr effectedPixelData;
 
     JUCE_LEAK_DETECTOR(Direct2DPixelData)
 };

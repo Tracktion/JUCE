@@ -104,6 +104,8 @@ public:
 
     virtual bool drawEllipse(Rectangle<float>, float) { return false; }
     virtual bool fillEllipse(Rectangle<float>) { return false; }
+
+    virtual int getFrameNumber() const { return 0; }
 };
 
 } // namespace juce

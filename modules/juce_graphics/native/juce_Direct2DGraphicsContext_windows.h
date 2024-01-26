@@ -30,6 +30,7 @@ struct PaintStats : public ReferenceCountedObject
     {
         messageThreadPaintDuration,
         frameInterval,
+        endDrawDuration,
         presentDuration,
         present1Duration,
         swapChainEventInterval,
@@ -40,14 +41,15 @@ struct PaintStats : public ReferenceCountedObject
         createFilledGRTime,
         createStrokedGRTime,
         createGradientTime,
+        pushGeometryLayerTime,
 
         numStats
     };
 
-    StringArray const accumulatorNames { "messageThreadPaintDuration", "frameInterval",          "presentDuration",
+    StringArray const accumulatorNames { "messageThreadPaintDuration", "frameInterval",          "EndDraw duration", "presentDuration",
                                          "present1Duration",           "swapChainEventInterval", "swapChainMessageTransitTime",
                                          "swapChainMessageInterval",   "VBlank to BeginDraw",
-                                         "Create geometry", "Create filled GR", "Create stroked GR", "Create gradient" };
+                                         "Create geometry", "Create filled GR", "Create stroked GR", "Create gradient", "Push Geometry layer" };
 
     int64 const  creationTime        = Time::getMillisecondCounter();
     double const millisecondsPerTick = 1000.0 / (double) Time::getHighResolutionTicksPerSecond();
@@ -234,8 +236,13 @@ public:
         return {};
     }
 
+    int getFrameNumber() const override
+    {
+        return frameNumber;
+    }
+
 #if JUCE_DIRECT2D_METRICS
-    direct2d::PaintStats::Ptr paintStats;
+    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats{};
 #endif
 
     //==============================================================================
@@ -244,7 +251,6 @@ public:
     //
     static int constexpr minFrameSize = 1;
     static int constexpr maxFrameSize = 16384;
-
 
     //==============================================================================
 protected:
@@ -258,8 +264,16 @@ protected:
 
     virtual void clearTargetBuffer() = 0;
     void drawGlyphCommon (int numGlyphs, Font const& font, const AffineTransform& transform, Rectangle<float> underlineArea);
-    void updateDeviceContextTransform();
-    void updateDeviceContextTransform (AffineTransform chainedTransform);
+
+    struct ScopedTransform
+    {
+        ScopedTransform(Pimpl& pimpl_, SavedState* state_);
+        ScopedTransform(Pimpl& pimpl_, SavedState* state_, const AffineTransform& transform);
+        ~ScopedTransform();
+
+        Pimpl& pimpl;
+        SavedState* state = nullptr;
+    };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DGraphicsContext)
 };

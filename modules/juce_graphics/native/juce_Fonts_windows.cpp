@@ -170,8 +170,8 @@ StringArray Font::findAllTypefaceNames()
 {
     StringArray results;
 
-    SharedResourcePointer<DirectX> directX;
-    if (auto systemFonts = directX->directWrite.getSystemFonts())
+    SharedResourcePointer<DirectWrite> directWrite;
+    if (auto systemFonts = directWrite->getSystemFonts())
     {
         ComSmartPtr<IDWriteFontFamily> fontFamily;
         uint32 fontFamilyCount = 0;
@@ -217,8 +217,8 @@ StringArray Font::findAllTypefaceStyles (const String& family)
 
     StringArray results;
 
-    SharedResourcePointer<DirectX> directX;
-    if (auto systemFonts = directX->directWrite.getSystemFonts())
+    SharedResourcePointer<DirectWrite> directWrite;
+    if (auto systemFonts = directWrite->getSystemFonts())
     {
         BOOL fontFound = false;
         uint32 fontIndex = 0;
@@ -592,8 +592,8 @@ const MAT2 WindowsTypeface::identityMatrix = { { 0, 1 }, { 0, 0 }, { 0, 0 }, { 0
 
 Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
 {
-    SharedResourcePointer<DirectX> directX;
-    if (auto systemFonts = directX->directWrite.getSystemFonts())
+    SharedResourcePointer<DirectWrite> directWrite;
+    if (auto systemFonts = directWrite->getSystemFonts())
     {
         std::unique_ptr<WindowsDirectWriteTypeface> wtf (new WindowsDirectWriteTypeface (font, systemFonts));
 

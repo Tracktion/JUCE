@@ -25,32 +25,32 @@ namespace juce
 
 class DirectWriteCustomFontCollectionLoader;
 
+//==============================================================================
+//
+// DirectWrite
+//
+
+class DirectWrite
+{
+public:
+    DirectWrite();
+    ~DirectWrite();
+
+    IDWriteFactory* getFactory() const { return directWriteFactory; }
+    IDWriteFontCollection* getSystemFonts() const { return systemFonts; }
+    IDWriteFontFamily* getFontFamilyForRawData(const void* data, size_t dataSize);
+    OwnedArray<DirectWriteCustomFontCollectionLoader>& getCustomFontCollectionLoaders() { return customFontCollectionLoaders; }
+
+private:
+    ComSmartPtr<IDWriteFactory> directWriteFactory;
+    ComSmartPtr<IDWriteFontCollection> systemFonts;
+    OwnedArray<DirectWriteCustomFontCollectionLoader> customFontCollectionLoaders;
+};
+
 struct DirectX
 {
     DirectX() = default;
     ~DirectX() = default;
-
-    //==============================================================================
-    //
-    // DirectWrite
-    //
-
-    class DirectWrite
-    {
-    public:
-        DirectWrite();
-        ~DirectWrite();
-
-        IDWriteFactory* getFactory() const { return directWriteFactory; }
-        IDWriteFontCollection* getSystemFonts() const { return systemFonts; }
-        IDWriteFontFamily* getFontFamilyForRawData(const void* data, size_t dataSize);
-        OwnedArray<DirectWriteCustomFontCollectionLoader>& getCustomFontCollectionLoaders() { return customFontCollectionLoaders; }
-
-    private:
-        ComSmartPtr<IDWriteFactory> directWriteFactory;
-        ComSmartPtr<IDWriteFontCollection> systemFonts;
-        OwnedArray<DirectWriteCustomFontCollectionLoader> customFontCollectionLoaders;
-    } directWrite;
 
     //==============================================================================
     //
@@ -85,8 +85,12 @@ struct DirectX
                 [[maybe_unused]] auto hr = CreateDXGIFactory(__uuidof (IDXGIFactory2), (void**)result.resetAndGetPointerAddress());
 
                 //
-                // If this is a plugin or other DLL, the DXGI factory cannot be created in the context of DllMain.
-                // Try creating your image or window from the message thread
+                // If CreateDXGIFactory fails, check to see if this is being called in the context of DllMain.
+                // CreateDXGIFactory will always fail if called from the context of DllMain. In this case, the renderer
+                // will create a software image instead as a fallback, but that won't perform as well.
+                //
+                // You may be creating an Image as a static object, which will likely be created in the context of DllMain.
+                // Consider deferring your Image creation until later.
                 //
                 jassert(SUCCEEDED(hr));
 
@@ -103,6 +107,8 @@ struct DirectX
         {
             adapters.releaseAdapters();
         }
+
+        bool isReady() const noexcept { return factory != nullptr; }
 
         struct Adapter : public ReferenceCountedObject
         {
@@ -169,7 +175,7 @@ struct DirectX
                     // This flag adds support for surfaces with a different color channel ordering
                     // than the API default. It is required for compatibility with Direct2D.
                     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if JUCE_DIRECTX_DEBUG
+#if JUCE_DIRECTX_DEBUG && JUCE_DEBUG
                     creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
                     jassert(dxgiAdapter);
@@ -266,7 +272,7 @@ struct DirectX
 
             IDXGIFactory2* getFactory() const { return factory; }
 
-            Adapter::Ptr const getAdapterForHwnd(HWND hwnd) const
+            Adapter::Ptr const getAdapterForHwnd(HWND hwnd)
             {
                 if (auto monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL))
                 {
@@ -289,7 +295,7 @@ struct DirectX
                 return getDefaultAdapter();
             }
 
-            Adapter::Ptr getDefaultAdapter() const
+            Adapter::Ptr getDefaultAdapter()
             {
                 return adapterArray.getFirst();
             }

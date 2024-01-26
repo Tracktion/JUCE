@@ -557,12 +557,12 @@ namespace juce
 
         auto getDirectWriteFactory()
         {
-            return directX->directWrite.getFactory();
+            return directWrite->getFactory();
         }
 
         auto getSystemFonts()
         {
-            return directX->directWrite.getSystemFonts();
+            return directWrite->getSystemFonts();
         }
 
         Image createSnapshot(direct2d::DPIScalableArea<int> scalableArea)

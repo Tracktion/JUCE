@@ -511,10 +511,11 @@ bool TextLayout::createNativeLayout ([[maybe_unused]] const AttributedString& te
 
     jassert(MessageManager::getInstance()->currentThreadHasLockedMessageManager());
 
+    SharedResourcePointer<DirectWrite> directWrite;
     SharedResourcePointer<DirectX> directX;
     auto d2dFactory = directX->direct2D.getFactory();
-    auto directWriteFactory = directX->directWrite.getFactory();
-    auto systemFonts = directX->directWrite.getSystemFonts();
+    auto directWriteFactory = directWrite->getFactory();
+    auto systemFonts = directWrite->getSystemFonts();
     auto directWriteRenderTarget = directX->direct2D.getDirectWriteRenderTarget();
     if (d2dFactory != nullptr
         && directWriteFactory

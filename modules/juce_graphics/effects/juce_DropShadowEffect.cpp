@@ -72,6 +72,13 @@ void DropShadow::drawForImage (Graphics& g, const Image& srcImage) const
 
     if (srcImage.isValid())
     {
+        if (auto shadowedImage = srcImage.getPixelData()->applyNativeDropShadowEffect((float)radius, colour); shadowedImage.has_value())
+        {
+            g.setColour(colour);
+            g.drawImageAt(*shadowedImage, offset.x, offset.y, false);
+            return;
+        }
+
         Image shadowImage (srcImage.convertedToFormat (Image::SingleChannel));
         shadowImage.duplicateIfShared();
 
@@ -99,6 +106,13 @@ void DropShadow::drawForPath (Graphics& g, const Path& path) const
             g2.setColour (Colours::white);
             g2.fillPath (path, AffineTransform::translation ((float) (offset.x - area.getX()),
                                                              (float) (offset.y - area.getY())));
+        }
+
+        if (auto shadowedImage = renderedPath.getPixelData()->applyNativeDropShadowEffect((float)radius, colour); shadowedImage.has_value())
+        {
+            g.setColour(colour);
+            g.drawImageAt(*shadowedImage, offset.x, offset.y, false);
+            return;
         }
 
         blurSingleChannelImage (renderedPath, radius);

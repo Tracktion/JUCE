@@ -92,18 +92,12 @@
   #pragma comment(lib, "vfw32.lib")
   #pragma comment(lib, "imm32.lib")
   #pragma comment(lib, "comctl32.lib")
-  #pragma comment(lib, "dxgi.lib")
 
   #if JUCE_OPENGL
    #pragma comment(lib, "OpenGL32.Lib")
    #pragma comment(lib, "GlU32.Lib")
   #endif
 
- #pragma comment (lib, "Dwrite.lib")
- #pragma comment (lib, "D2d1.lib")
- #pragma comment (lib, "DXGI.lib")
- #pragma comment (lib, "D3D11.lib")
- #pragma comment (lib, "DComp.lib")
  #endif
 #endif
 

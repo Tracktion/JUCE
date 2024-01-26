@@ -74,6 +74,11 @@ static D2D1_COLOR_F colourToD2D (Colour c)
 //
 // Convert a JUCE Path to a D2D Geometry
 //
+static bool isTransformAxisAligned(AffineTransform const& transform)
+{
+    return transform.mat01 == 0.0f && transform.mat10 == 0.0f;
+}
+
 static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform, D2D1_FIGURE_BEGIN figureMode)
 {
     //
@@ -265,6 +270,32 @@ struct ScopedGeometryWithSink
     ComSmartPtr<ID2D1PathGeometry> geometry;
     ComSmartPtr<ID2D1GeometrySink> sink;
 };
+
+static ComSmartPtr<ID2D1Geometry> exclusionRectToPathGeometry(ID2D1Factory* factory,
+    const Rectangle<int> excludedRegion,
+    const AffineTransform& transform)
+{
+    //
+    // To exclude the rectangle r, create a geometry with excludedRegion r as the first rectangle
+    // and a very large rectangle as the second.
+    //
+    // Specify D2D1_FILL_MODE_ALTERNATE so the inside of r is *outside*
+    // the geometry and everything else on the screen is inside the geometry.
+    //
+    ScopedGeometryWithSink objects{ factory, D2D1_FILL_MODE_ALTERNATE };
+
+    if (objects.sink != nullptr)
+    {
+        direct2d::rectToGeometrySink(excludedRegion, objects.sink, transform, D2D1_FIGURE_BEGIN_FILLED);
+
+        auto constexpr size = Direct2DGraphicsContext::maxFrameSize;
+        direct2d::rectToGeometrySink({ -size, -size, size * 2, size * 2 }, objects.sink, transform, D2D1_FIGURE_BEGIN_FILLED);
+
+        return { (ID2D1Geometry*)objects.geometry };
+    }
+
+    return nullptr;
+}
 
 static ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (ID2D1Factory* factory,
                                                           const RectangleList<int>& clipRegion,
@@ -786,6 +817,15 @@ static LeastRecentlyUsedCacheTests leastRecentlyUsedCacheTests;
 
 #if JUCE_ETW_TRACELOGGING
 
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wgnu-zero-variadic-macro-arguments")
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wmissing-prototypes")
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wc++98-compat-extra-semi")
+TRACELOGGING_DEFINE_PROVIDER (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE,
+                              "JuceEtwTraceLogging",
+                              // {6A612E78-284D-4DDB-877A-5F521EB33132}
+                              (0x6a612e78, 0x284d, 0x4ddb, 0x87, 0x7a, 0x5f, 0x52, 0x1e, 0xb3, 0x31, 0x32));
+JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+
 ETWEventProvider::ETWEventProvider()
 {
     auto hr = TraceLoggingRegister (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE);
@@ -798,8 +838,6 @@ ETWEventProvider::~ETWEventProvider()
     TraceLoggingUnregister (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE);
 }
 
-JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wc++98-compat-extra-semi", "-Wmissing-prototypes", "-Wgnu-zero-variadic-macro-arguments")
-TRACELOGGING_DEFINE_PROVIDER(JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, "JuceEtwTraceLogging", (0x6a612e78, 0x284d, 0x4ddb, 0x87, 0x7a, 0x5f, 0x52, 0x1e, 0xb3, 0x31, 0x32)); // {6A612E78-284D-4DDB-877A-5F521EB33132
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 #endif

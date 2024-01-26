@@ -728,6 +728,10 @@ public:
     /** @internal */
     LowLevelGraphicsContext& getInternalContext() const noexcept    { return context; }
 
+#if JUCE_ETW_TRACELOGGING
+    static int etwFrameNumber;
+#endif
+
 private:
     //==============================================================================
     std::unique_ptr<LowLevelGraphicsContext> contextHolder;
