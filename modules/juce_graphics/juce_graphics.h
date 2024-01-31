@@ -83,10 +83,6 @@
  #define USE_COREGRAPHICS_RENDERING 1
 #endif
 
-#ifndef JUCE_DIRECTX_DEBUG
- #define JUCE_DIRECTX_DEBUG 0
-#endif
-
 //==============================================================================
 namespace juce
 {

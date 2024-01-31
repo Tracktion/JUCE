@@ -36,6 +36,8 @@ namespace juce
         Pimpl* getPimpl() const noexcept override;
         void clearTargetBuffer() override;
 
+        static int nextFrameNumber;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Direct2DImageContext)
     };
 

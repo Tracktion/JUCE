@@ -38,8 +38,9 @@ namespace juce
 
         enum : uint16
         {
-            direct2dPaintStart = 0,
-            direct2dPaintEnd,
+            direct2dHwndPaintStart = 0,
+            direct2dHwndPaintEnd,
+            endDraw,
             present1SwapChainStart,
             present1SwapChainEnd,
             swapChainThreadEvent,
@@ -48,6 +49,13 @@ namespace juce
             resize,
             createResource,
             presentIdleFrame,
+            direct2dImagePaintStart,
+            direct2dImagePaintEnd,
+            startD2DFrame,
+            flush,
+            startGDIFrame,
+            startGDIImage,
+            endGDIFrame,
 
             createLowLevelGraphicsContext,
             createDeviceResources,
@@ -56,6 +64,8 @@ namespace juce
             createPeer,
             mapBitmap,
             unmapBitmap,
+            createDirect2DBitmapFromImage,
+            createDirect2DBitmap,
 
             setOrigin,
             addTransform,
@@ -90,45 +100,16 @@ namespace juce
             fillRoundedRectangle,
             drawEllipse,
             fillEllipse,
-            setOriginDone,
-            addTransformDone,
-            clipToRectangleDone,
-            clipToRectangleListDone,
-            excludeClipRectangleDone,
-            clipToPathDone,
-            clipToImageAlphaDone,
-            saveStateDone,
-            restoreStateDone,
-            beginTransparencyLayerDone,
-            endTransparencyLayerDone,
-            setFillDone,
-            setOpacityDone,
-            setInterpolationQualityDone,
-            fillRectDone,
-            fillRectListDone,
-            drawRectDone,
-            fillPathDone,
-            drawPathDone,
-            drawImageDone,
-            drawLineDone,
-            setFontDone,
-            drawGlyphDone,
-            drawGlyphRunDone,
-            drawTextLayoutDone,
-            drawRoundedRectangleDone,
-            fillRoundedRectangleDone,
-            drawEllipseDone,
-            fillEllipseDone,
-            drawGeometryDone,
-            fillGeometryDone,
-            drawGeometryRealizationDone,
-            fillGeometryRealizationDone,
             filledGeometryRealizationCacheHit,
             filledGeometryRealizationCreated,
             strokedGeometryRealizationCacheHit,
             strokedGeometryRealizationCreated,
+            releaseGeometryRealization,
             gradientCacheHit,
             gradientCreated,
+            releaseGradient,
+            nativeDropShadow,
+            nativeGlowEffect,
 
             resetToDefaultState,
             reduceClipRegionRectangle,
@@ -138,6 +119,7 @@ namespace juce
             excludeClipRegion,
             fillAll,
 
+            repaint,
             paintComponentAndChildren,
             paintWithinParentContext
         };
@@ -273,7 +255,6 @@ struct ScopedTraceEvent \
 ste.array[0] = x; ste.array[1] = y; ste.array[2] = w; ste.array[3] = h; \
 ste.frameNumber = etwFrameNumber;
 
-
 #define SCOPED_TRACE_EVENT_INT_RECT_LIST(code, etwFrameNumber, list, keyword) \
 struct ScopedTraceEvent \
 { \
@@ -342,6 +323,37 @@ struct ScopedTraceEvent \
 } ste{ list };\
 ste.frameNumber = etwFrameNumber;
 
+#define TRACE_EVENT_INT_RECT_LIST(code, frameNumber, list, keyword) \
+{ \
+    HeapBlock<int32_t> array{ list.getNumRectangles() * 4, false }; \
+    uint16 arrayLength = (uint16)(list.getNumRectangles() * 4); \
+    int32* dest = array.getData();\
+\
+    for (auto const& r : list)\
+    {\
+        dest[0] = r.getX(); dest[1] = r.getY(); dest[2] = r.getWidth(); dest[3] = r.getHeight();\
+    }\
+\
+    TraceLoggingWriteWrapper(JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE,\
+        # code,\
+        TraceLoggingLevel(TRACE_LEVEL_INFORMATION),\
+        TraceLoggingKeyword(keyword),\
+        TraceLoggingInt32(code, "code"),\
+        TraceLoggingInt32 (frameNumber, "frame"),\
+        TraceLoggingInt32Array(array, (uint16)arrayLength, "list"));\
+}
+
+#define TRACE_EVENT_INT_RECT(code, area, keyword) \
+{ \
+    int32_t array[4] = { area.getX(), area.getY(), area.getWidth(), area.getHeight() }; \
+    TraceLoggingWriteWrapper(JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
+           # code, \
+           TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
+           TraceLoggingKeyword (keyword), \
+           TraceLoggingInt32 (code, "code"), \
+           TraceLoggingInt32FixedArray(array, 4, "area")); \
+}
+
 #else
 
 #define TraceLoggingWriteWrapper(hProvider, eventName, ...)
@@ -353,32 +365,18 @@ ste.frameNumber = etwFrameNumber;
 #define SCOPED_TRACE_EVENT_FLOAT_XYWH(code, etwFrameNumber, x, y, w, h, keyword)
 #define SCOPED_TRACE_EVENT_INT_RECT_LIST(code, etwFrameNumber, list, keyword)
 #define SCOPED_TRACE_EVENT_FLOAT_RECT_LIST(code, etwFrameNumber, list, keyword)
+#define TRACE_EVENT_INT_RECT_LIST(code, etwFrameNumber, list, keyword)
+#define TRACE_EVENT_INT_RECT(code, area, keyword)
 
 #endif
 
 #define TRACE_LOG_D2D_PAINT_CALL(code, frameNumber) \
     TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
-                   "D2D paint start", \
+                   # code, \
                    TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
                    TraceLoggingKeyword (etw::paintKeyword | etw::direct2dKeyword), \
                    TraceLoggingInt32 (frameNumber, "frame"), \
                    TraceLoggingInt32 (code, "code"))
-
-#define TRACE_LOG_D2D_PAINT_START(frameNumber) \
-    TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
-                   "D2D paint start", \
-                   TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
-                   TraceLoggingKeyword (etw::paintKeyword | etw::direct2dKeyword), \
-                   TraceLoggingInt32 (frameNumber, "frame"), \
-                   TraceLoggingInt32 (etw::direct2dPaintStart, "code"))
-
-#define TRACE_LOG_D2D_PAINT_END(frameNumber) \
-    TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
-                       "D2D paint end", \
-                       TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
-                       TraceLoggingKeyword (etw::paintKeyword | etw::direct2dKeyword), \
-                       TraceLoggingInt32 (frameNumber, "frame"),                       \
-                       TraceLoggingInt32 (etw::direct2dPaintEnd, "code"))
 
 #define TRACE_LOG_JUCE_VBLANK_THREAD_EVENT                          \
     TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE,       \
@@ -415,3 +413,19 @@ ste.frameNumber = etwFrameNumber;
                    TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
                    TraceLoggingKeyword (etw::direct2dKeyword), \
                    TraceLoggingInt32 (etw::unmapBitmap, "code"))
+
+#define TRACE_LOG_PAINT_COMPONENT_AND_CHILDREN(depth) \
+    TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
+                   "Paint component and children", \
+                   TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
+                   TraceLoggingKeyword (etw::paintKeyword), \
+                   TraceLoggingInt32 (depth, "depth"), \
+                   TraceLoggingInt32 (etw::paintComponentAndChildren, "code"))
+
+#define TRACE_LOG_PAINT_CALL(code, frameNumber, keyword) \
+    TraceLoggingWriteWrapper (JUCE_ETW_TRACELOGGING_PROVIDER_HANDLE, \
+                   # code, \
+                   TraceLoggingLevel (TRACE_LEVEL_INFORMATION), \
+                   TraceLoggingKeyword (keyword), \
+                   TraceLoggingInt32 (frameNumber, "frame"), \
+                   TraceLoggingInt32 (code, "code"))

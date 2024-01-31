@@ -99,7 +99,10 @@ JUCE_IMPLEMENT_SINGLETON (ModalComponentManager)
 void ModalComponentManager::startModal (Component* component, bool autoDelete)
 {
     if (component != nullptr)
+    {
         stack.add (new ModalItem (component, autoDelete));
+        detail::ComponentHelpers::ModalComponentManagerChangeNotifier::getInstance().modalComponentManagerChanged();
+    }
 }
 
 void ModalComponentManager::attachCallback (Component* component, Callback* callback)
@@ -203,6 +206,8 @@ void ModalComponentManager::handleAsyncUpdate()
                 item->callbacks.getUnchecked (j)->modalStateFinished (item->returnValue);
 
             compToDelete.deleteAndZero();
+
+            detail::ComponentHelpers::ModalComponentManagerChangeNotifier::getInstance().modalComponentManagerChanged();
         }
     }
 }

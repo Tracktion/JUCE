@@ -115,11 +115,7 @@ DirectX::Direct2D::Direct2D()
 {
     {
         D2D1_FACTORY_OPTIONS options;
-#if JUCE_DIRECTX_DEBUG && JUCE_DEBUG
-        options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
-#else
         options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
-#endif
         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wlanguage-extension-token")
         [[maybe_unused]] auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof (ID2D1Factory1), &options,
             (void**)d2dSharedFactory.resetAndGetPointerAddress());

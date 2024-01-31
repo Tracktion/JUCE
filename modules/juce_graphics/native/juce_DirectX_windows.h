@@ -175,9 +175,6 @@ struct DirectX
                     // This flag adds support for surfaces with a different color channel ordering
                     // than the API default. It is required for compatibility with Direct2D.
                     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if JUCE_DIRECTX_DEBUG && JUCE_DEBUG
-                    creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
                     jassert(dxgiAdapter);
 
                     hr = D3D11CreateDevice(dxgiAdapter,

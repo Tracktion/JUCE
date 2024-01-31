@@ -1658,6 +1658,20 @@ void Component::paintWithinParentContext (Graphics& g)
 
 void Component::paintComponentAndChildren (Graphics& g)
 {
+#if JUCE_ETW_TRACELOGGING
+    {
+        int depth = 0;
+        auto parent = getParentComponent();
+        while (parent)
+        {
+            parent = parent->getParentComponent();
+            depth++;
+        }
+
+        TRACE_LOG_PAINT_COMPONENT_AND_CHILDREN(depth);
+    }
+#endif
+
     auto clipBounds = g.getClipBounds();
 
     if (flags.dontClipGraphicsFlag && getNumChildComponents() == 0)
@@ -1741,12 +1755,26 @@ void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel)
 
         auto scaledBounds = getLocalBounds() * scale;
 
-        Image effectImage (flags.opaqueFlag ? Image::RGB : Image::ARGB,
-                           scaledBounds.getWidth(), scaledBounds.getHeight(), ! flags.opaqueFlag);
+        //
+        // Store the effect image in the image cache to avoid recreating it every time
+        //
+        auto imageFormat = flags.opaqueFlag ? Image::RGB : Image::ARGB;
+        int64 imageHashCode = scaledBounds.getWidth() | ((int64)scaledBounds.getHeight() << 24) | ((int64)imageFormat << 56);
+        auto effectImage = ImageCache::getFromHashCode (imageHashCode);
+        if (effectImage.isNull())
+        {
+            effectImage = Image{ imageFormat, scaledBounds.getWidth(), scaledBounds.getHeight(), !flags.opaqueFlag };
+            ImageCache::addImageToCache (effectImage, imageHashCode);
+        }
+
+        effectImage.clear(effectImage.getBounds(), (imageFormat == Image::ARGB) ? Colours::transparentBlack : Colours::black);
+
         {
             Graphics g2 (effectImage);
+
             g2.addTransform (AffineTransform::scale ((float) scaledBounds.getWidth()  / (float) getWidth(),
                                                      (float) scaledBounds.getHeight() / (float) getHeight()));
+
             paintComponentAndChildren (g2);
         }
 

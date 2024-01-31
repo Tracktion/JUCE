@@ -286,10 +286,13 @@ namespace juce
             // Please refer to setScaleFactor() to see how the snap factor is calculated.
             //
             auto snapMask = ~(repaintAreaPixelSnap - 1);
-            deferredRepaints.add(Rectangle<int>::leftTopRightBottom(deferredRepaint.getX() & snapMask,
+            auto snappedRectangle = Rectangle<int>::leftTopRightBottom(deferredRepaint.getX() & snapMask,
                 deferredRepaint.getY() & snapMask,
                 (deferredRepaint.getRight() + repaintAreaPixelSnap - 1) & snapMask,
-                (deferredRepaint.getBottom() + repaintAreaPixelSnap - 1) & snapMask));
+                (deferredRepaint.getBottom() + repaintAreaPixelSnap - 1) & snapMask);
+            deferredRepaints.add(snappedRectangle);
+
+            TRACE_EVENT_INT_RECT(etw::repaint, snappedRectangle, etw::paintKeyword);
         }
 
         void addInvalidWindowRegionToDeferredRepaints()
@@ -333,6 +336,8 @@ namespace juce
             //
             if (savedState)
             {
+                TRACE_LOG_D2D_PAINT_CALL(etw::direct2dHwndPaintStart, owner.llgcFrameNumber);
+
                 deferredRepaints.clear();
             }
 
@@ -431,6 +436,8 @@ namespace juce
                 teardown();
             }
 
+            TRACE_LOG_D2D_PAINT_CALL(etw::direct2dHwndPaintEnd, owner.llgcFrameNumber);
+
             return hr;
         }
 
@@ -510,7 +517,7 @@ namespace juce
             jassert(savedClientStates.size() == 0);
 
             savedClientStates.push(
-                std::make_unique<SavedState>(initialClipRegion, deviceResources.colourBrush, adapter, deviceResources));
+                std::make_unique<SavedState>(owner, initialClipRegion, deviceResources.colourBrush, adapter, deviceResources));
 
             return getCurrentSavedState();
         }

@@ -96,14 +96,20 @@ namespace juce
 
     //==============================================================================
 
+    int Direct2DImageContext::nextFrameNumber = -1;
+
     Direct2DImageContext::Direct2DImageContext(DirectX::DXGI::Adapter::Ptr adapter_) :
         pimpl(new ImagePimpl{ *this, adapter_ })
     {
+        llgcFrameNumber = nextFrameNumber;
+        nextFrameNumber--;
     }
 
     Direct2DImageContext::~Direct2DImageContext()
     {
         endFrame();
+
+        TRACE_LOG_D2D_PAINT_CALL(etw::direct2dImagePaintEnd, llgcFrameNumber);
     }
 
     Direct2DGraphicsContext::Pimpl* Direct2DImageContext::getPimpl() const noexcept
@@ -117,6 +123,8 @@ namespace juce
         pimpl->setScaleFactor(dpiScaleFactor);
 
         Direct2DGraphicsContext::startFrame();
+
+        TRACE_LOG_D2D_PAINT_CALL(etw::direct2dImagePaintStart, llgcFrameNumber);
     }
 
     void Direct2DImageContext::clearTargetBuffer()

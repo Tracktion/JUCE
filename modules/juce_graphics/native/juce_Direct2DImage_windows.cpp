@@ -141,6 +141,14 @@ namespace juce
         }
     }
 
+    int64 Direct2DPixelData::getEffectImageHash() const noexcept
+    {
+        auto hash = 0xd2d000000000000ll;
+        hash |= width;
+        hash |= (int64)height << 24;
+        return hash;
+    }
+
     ReferenceCountedObjectPtr<Direct2DPixelData> Direct2DPixelData::fromDirect2DBitmap(ID2D1Bitmap1* const bitmap,
         direct2d::DPIScalableArea<int> area)
     {
@@ -297,41 +305,10 @@ namespace juce
         return bitmapArea.getDPIScalingFactor();
     }
 
-    std::optional<Image> Direct2DPixelData::applyNativeGaussianBlurEffect(float radius)
+    std::optional<Image> Direct2DPixelData::applyNativeDropShadowEffect(float radius, Colour colour, float brightness, [[maybe_unused]] int frameNumber)
     {
-        ComSmartPtr<ID2D1Effect> effect;
+        SCOPED_TRACE_EVENT(etw::nativeDropShadow, frameNumber, etw::graphicsKeyword);
 
-        if (deviceResources.deviceContext.context)
-        {
-            deviceResources.deviceContext.context->CreateEffect(CLSID_D2D1GaussianBlur, effect.resetAndGetPointerAddress());
-            if (effect)
-            {
-                effect->SetInput(0, getAdapterD2D1Bitmap(imageAdapter));
-                effect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, radius);
-
-                if (! effectedPixelData)
-                {
-                    effectedPixelData = new Direct2DPixelData{ pixelFormat, bitmapArea, true, imageAdapter };
-                }
-
-                if (auto effectedPixelDataContext = effectedPixelData->deviceResources.deviceContext.context)
-                {
-                    effectedPixelDataContext->SetTarget(effectedPixelData->getAdapterD2D1Bitmap(imageAdapter));
-                    effectedPixelDataContext->BeginDraw();
-                    effectedPixelDataContext->DrawImage(effect);
-                    effectedPixelDataContext->EndDraw();
-                    effectedPixelDataContext->SetTarget(nullptr);
-                }
-                return { Image{ effectedPixelData } };
-            }
-        }
-
-        return {};
-    }
-
-
-    std::optional<Image> Direct2DPixelData::applyNativeDropShadowEffect(float radius, Colour colour)
-    {
         ComSmartPtr<ID2D1Effect> effect;
 
         if (deviceResources.deviceContext.context)
@@ -340,27 +317,49 @@ namespace juce
             if (effect)
             {
                 effect->SetInput(0, getAdapterD2D1Bitmap(imageAdapter));
-                effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, radius / 6.0f);
-                effect->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1_VECTOR_4F{ colour.getFloatRed(), colour.getFloatGreen(), colour.getFloatBlue(), 1.0f });
+                effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, radius / 4.5f);
 
-                if (!effectedPixelData)
-                {
-                    effectedPixelData = new Direct2DPixelData{ pixelFormat, bitmapArea, true, imageAdapter };
-                }
+                auto d2dColor = direct2d::colourToD2D(colour);
+                d2dColor.a *= brightness;
+                d2dColor.r *= brightness;
+                d2dColor.g *= brightness;
+                d2dColor.b *= brightness;
+                effect->SetValue(D2D1_SHADOW_PROP_COLOR, d2dColor);
 
-                if (auto effectedPixelDataContext = effectedPixelData->deviceResources.deviceContext.context)
-                {
-                    effectedPixelDataContext->SetTarget(effectedPixelData->getAdapterD2D1Bitmap(imageAdapter));
-                    effectedPixelDataContext->BeginDraw();
-                    effectedPixelDataContext->DrawImage(effect);
-                    effectedPixelDataContext->EndDraw();
-                    effectedPixelDataContext->SetTarget(nullptr);
-                }
-                return { Image{ effectedPixelData } };
+                return applyNativeEffect(effect);
             }
         }
 
         return {};
+    }
+
+    std::optional<juce::Image> Direct2DPixelData::applyNativeEffect(ID2D1Effect* effect)
+    {
+        auto hash = getEffectImageHash();
+        auto outputImage = ImageCache::getFromHashCode(hash);
+        if (outputImage.isNull())
+        {
+            outputImage = Image{ Image::ARGB, width,height, false };
+            ImageCache::addImageToCache(outputImage, hash);
+        }
+
+        applyNativeEffect(effect, outputImage);
+
+        return outputImage;
+    }
+
+    void Direct2DPixelData::applyNativeEffect(ID2D1Effect* effect, Image& destImage)
+    {
+        auto outputPixelData = dynamic_cast<Direct2DPixelData*>(destImage.getPixelData());
+        if (auto outputDataContext = outputPixelData->deviceResources.deviceContext.context)
+        {
+            outputDataContext->SetTarget(outputPixelData->getAdapterD2D1Bitmap(imageAdapter));
+            outputDataContext->BeginDraw();
+            outputDataContext->Clear();
+            outputDataContext->DrawImage(effect);
+            outputDataContext->EndDraw();
+            outputDataContext->SetTarget(nullptr);
+        }
     }
 
     std::unique_ptr<ImageType> Direct2DPixelData::createType() const

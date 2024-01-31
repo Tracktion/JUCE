@@ -77,11 +77,6 @@ namespace juce
                 transform = {};
             }
 
-            //
-            // The profiler shows that calling deviceContext->SetTransform is
-            // surprisingly expensive. This class only calls SetTransform
-            // if the transform is changing
-            //
             void setTransform(AffineTransform newTransform)
             {
                 context->SetTransform(transformToMatrix(newTransform));
@@ -110,6 +105,8 @@ namespace juce
             static Direct2DBitmap fromImage(Image const& image, ID2D1DeviceContext1* deviceContext, Image::PixelFormat outputFormat)
             {
                 jassert(outputFormat == Image::ARGB || outputFormat == Image::SingleChannel);
+
+                TRACE_LOG_D2D_PAINT_CALL(etw::createDirect2DBitmapFromImage, etw::graphicsKeyword);
 
                 //
                 // Calling Image::convertedToFormat could cause unchecked recursion since convertedToFormat
@@ -163,6 +160,8 @@ namespace juce
                 float dpiScaleFactor,
                 D2D1_BITMAP_OPTIONS options)
             {
+                TRACE_LOG_D2D_PAINT_CALL(etw::createDirect2DBitmap, etw::graphicsKeyword);
+
                 if (! bitmap)
                 {
                     D2D1_BITMAP_PROPERTIES1 bitmapProperties = {};
@@ -337,6 +336,8 @@ namespace juce
                     //
                     while (lruCache.size() > maxNumCacheEntries)
                     {
+                        TRACE_LOG_D2D_PAINT_CALL(etw::releaseGeometryRealization, etw::graphicsKeyword);
+
                         lruCache.popBack();
                     }
                 }
@@ -379,6 +380,7 @@ namespace juce
                     {
                         TRACE_LOG_D2D_PAINT_CALL(etw::filledGeometryRealizationCacheHit, frameNumber);
                     }
+
                     else
                     {
 #if JUCE_DIRECT2D_METRICS
@@ -625,6 +627,8 @@ namespace juce
                     //
                     while (lruCache.size() > maxNumCacheEntries)
                     {
+                        TRACE_LOG_D2D_PAINT_CALL(etw::releaseGradient, etw::graphicsKeyword);
+
                         lruCache.popBack();
                     }
                 }

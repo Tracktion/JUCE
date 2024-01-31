@@ -392,10 +392,9 @@ public:
 
     void clearWindowAssociation() { association = {}; }
 
-    void startHostManagedResize (Point<int> mouseDownPosition,
-                                 ResizableBorderComponent::Zone zone) override
+    void startHostManagedResize (Point<int>, ResizableBorderComponent::Zone zone) override
     {
-        XWindowSystem::getInstance()->startHostManagedResize (windowH, mouseDownPosition, zone);
+        XWindowSystem::getInstance()->startHostManagedResize (windowH, zone);
     }
 
     //==============================================================================
@@ -502,26 +501,6 @@ private:
         JUCE_DECLARE_NON_COPYABLE (LinuxRepaintManager)
     };
 
-    class LinuxVBlankManager final : public Timer
-    {
-    public:
-        explicit LinuxVBlankManager (std::function<void()> cb)  : callback (std::move (cb))
-        {
-            jassert (callback);
-        }
-
-        ~LinuxVBlankManager() override           { stopTimer(); }
-
-        //==============================================================================
-        void timerCallback() override            { callback(); }
-
-    private:
-        std::function<void()> callback;
-
-        JUCE_DECLARE_NON_COPYABLE (LinuxVBlankManager)
-        JUCE_DECLARE_NON_MOVEABLE (LinuxVBlankManager)
-    };
-
     //==============================================================================
     template <typename This>
     static Point<float> localToGlobal (This& t, Point<float> relativePosition)
@@ -588,7 +567,7 @@ private:
 
     //==============================================================================
     std::unique_ptr<LinuxRepaintManager> repainter;
-    LinuxVBlankManager vBlankManager { [this]() { onVBlank(); } };
+    TimedCallback vBlankManager { [this]() { onVBlank(); } };
 
     ::Window windowH = {}, parentWindow = {};
     Rectangle<int> bounds;

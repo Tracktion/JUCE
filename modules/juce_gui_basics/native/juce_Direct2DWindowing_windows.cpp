@@ -216,10 +216,13 @@ private:
         // Direct2DLowLevelGraphicsContext::endFrame calls ID2D1DeviceContext::EndDraw to finish painting
         // and then tells the swap chain to present the next swap chain back buffer.
         //
+        direct2DContext->llgcFrameNumber = peerFrameNumber;
         if (direct2DContext->startFrame())
         {
             handlePaint (*direct2DContext);
             direct2DContext->endFrame();
+
+            peerFrameNumber++;
 
     #if JUCE_DIRECT2D_METRICS
             if (lastPaintStartTicks > 0 && direct2DContext->paintStats)

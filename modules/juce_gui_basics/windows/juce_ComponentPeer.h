@@ -545,6 +545,8 @@ public:
     /** Returns the style requested for this app. */
     Style getAppStyle() const { return style; }
 
+    int peerFrameNumber = 0;
+
 protected:
     //==============================================================================
     static void forceDisplayUpdate();

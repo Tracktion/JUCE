@@ -235,7 +235,6 @@ public:
     bool isX11Available() const noexcept  { return xIsAvailable; }
 
     void startHostManagedResize (::Window window,
-                                 Point<int> mouseDown,
                                  ResizableBorderComponent::Zone zone);
 
     static String getWindowScalingFactorSettingName()  { return "Gdk/WindowScalingFactor"; }

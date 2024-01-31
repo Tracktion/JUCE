@@ -168,8 +168,7 @@ public:
 
     float getDPIScalingFactor() const noexcept;
 
-    std::optional<Image> applyNativeGaussianBlurEffect(float radius) override;
-    std::optional<Image> applyNativeDropShadowEffect(float radius, Colour color) override;
+    std::optional<Image> applyNativeDropShadowEffect(float radius, Colour color, float brightness, int frameNumber) override;
 
     std::unique_ptr<ImageType> createType() const override;
 
@@ -336,6 +335,10 @@ private:
     void createAdapterBitmap();
     void release();
 
+    int64 getEffectImageHash() const noexcept;
+    std::optional<Image> applyNativeEffect(ID2D1Effect* effect);
+    void applyNativeEffect(ID2D1Effect* effect, Image& destImage);
+
     SharedResourcePointer<DirectX> directX;
     DirectX::DXGI::Adapter::Ptr imageAdapter;
     direct2d::DeviceResources deviceResources;
@@ -344,7 +347,6 @@ private:
     bool const                clearImage;
     AdapterBitmap adapterBitmap;
     ReferenceCountedArray<MappableBitmap> mappableBitmaps;
-    Direct2DPixelData::Ptr effectedPixelData;
 
     JUCE_LEAK_DETECTOR(Direct2DPixelData)
 };
