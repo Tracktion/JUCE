@@ -176,10 +176,6 @@ private:
             addMethod (@selector (clipsToBounds), [] (id, SEL) { return YES; });
             JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
-            JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wundeclared-selector")
-            addMethod (@selector (clipsToBounds), [] (id, SEL) { return YES; });
-            JUCE_END_IGNORE_WARNINGS_GCC_LIKE
-
             registerClass();
         }
     };
