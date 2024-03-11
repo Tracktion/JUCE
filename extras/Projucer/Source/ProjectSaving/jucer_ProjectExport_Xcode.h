@@ -63,7 +63,7 @@ public:
 
     ScriptBuilder& echo (const String& text)
     {
-        return insertLine ("echo " + doubleQuoted (text.removeCharacters ("\"")));
+        return insertLine ("echo " + text.replace ("\"", "\\\""));
     }
 
     ScriptBuilder& remove (const String& path)
@@ -2592,10 +2592,11 @@ private:
                 const auto codesignScript = ScriptBuilder{}
                         .ifSet ("CODE_SIGN_ENTITLEMENTS",
                                 R"(entitlementsArg=(--entitlements "${CODE_SIGN_ENTITLEMENTS}"))")
+                        .echo ("Signing Identity: " + doubleQuoted ("${EXPANDED_CODE_SIGN_IDENTITY_NAME}") )
                         .run ("codesign --verbose=4 --force --sign",
-                              doubleQuoted ("${CODE_SIGN_IDENTITY:--}"),
+                              doubleQuoted ("${EXPANDED_CODE_SIGN_IDENTITY}"),
                               "${entitlementsArg[*]-}",
-                              "${OTHER_CODE_SIGN_ARGS-}",
+                              "${OTHER_CODE_SIGN_FLAGS-}",
                               doubleQuoted (installPath + objectToSignTail));
 
                 copyPluginStepScript.ifEqual (doubleQuoted ("${CONFIGURATION}"), doubleQuoted (config->getName()),
