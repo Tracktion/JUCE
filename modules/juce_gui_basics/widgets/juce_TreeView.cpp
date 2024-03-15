@@ -656,8 +656,8 @@ private:
             if (itm->y + itm->itemHeight > visibleTop && itm->y < visibleBottom)
             {
                 visibleItems.push_back (itm);
-                if (! firstIndex.has_value()) firstIndex = i;
-                lastIndex = i;
+                if (! firstIndex.has_value()) firstIndex = int (i);
+                lastIndex = int (i);
             }
         }
         
