@@ -621,17 +621,6 @@ private:
         }
     }
 
-    static TreeViewItem* getNextVisibleItem (TreeViewItem* item, bool forwards)
-    {
-        if (item == nullptr || item->ownerView == nullptr)
-            return nullptr;
-
-        auto* nextItem = item->ownerView->getItemOnRow (item->getRowNumberInTree() + (forwards ? 1 : -1));
-
-        return nextItem == item->ownerView->rootItem && ! item->ownerView->rootItemVisible ? nullptr
-                                                                                           : nextItem;
-    }
-
     std::vector<TreeViewItem*> getAllVisibleItems() const
     {
         if (owner.rootItem == nullptr)
@@ -640,45 +629,56 @@ private:
         const auto visibleTop = -getY();
         const auto visibleBottom = visibleTop + getParentHeight();
 
+        std::vector<TreeViewItem*> allItems;
         std::vector<TreeViewItem*> visibleItems;
-
-        auto* item = [&]
+                
+        std::function<void (TreeViewItem*)> findItems;
+        
+        findItems = [&] (TreeViewItem* itm)
         {
-            auto* i = owner.rootItemVisible ? owner.rootItem
-                                            : owner.rootItem->subItems.getFirst();
-
-            while (i != nullptr && i->y + i->getItemHeight() < visibleTop)
-                i = getNextVisibleItem (i, true);
-
-            return i;
-        }();
-
-        auto addOffscreenItemBuffer = [&visibleItems] (TreeViewItem* i, int num, bool forwards)
-        {
-            while (--num >= 0)
-            {
-                i = getNextVisibleItem (i, forwards);
-
-                if (i == nullptr)
-                    return;
-
-                visibleItems.push_back (i);
-            }
+            if (itm != owner.rootItem || owner.rootItemVisible)
+                allItems.push_back (itm);
+            
+            if (itm->isOpen())
+                for (int i = 0; i < itm->getNumSubItems(); i++)
+                    findItems (itm->getSubItem (i));
         };
-
-        addOffscreenItemBuffer (item, 2, false);
-
-        while (item != nullptr && item->y < visibleBottom)
+        
+        findItems (owner.rootItem);
+        
+        std::optional<int> firstIndex;
+        std::optional<int> lastIndex;
+        
+        for (size_t i = 0; i < allItems.size(); i++)
         {
-            visibleItems.push_back (item);
-            item = getNextVisibleItem (item, true);
+            auto itm = allItems[i];
+            
+            if (itm->y + itm->itemHeight > visibleTop && itm->y < visibleBottom)
+            {
+                visibleItems.push_back (itm);
+                if (! firstIndex.has_value()) firstIndex = i;
+                lastIndex = i;
+            }
         }
-
-        if (item != nullptr)
-            visibleItems.push_back (item);
-
-        addOffscreenItemBuffer (item, 2, true);
-
+        
+        if (firstIndex.has_value())
+        {
+            if (*firstIndex - 1 >= 0) 
+                visibleItems.insert (visibleItems.begin(), allItems[size_t (*firstIndex - 1)]);
+            
+            if (*firstIndex - 2 >= 0)
+                visibleItems.insert (visibleItems.begin(), allItems[size_t (*firstIndex - 2)]);
+        }
+        
+        if (lastIndex.has_value())
+        {
+            if (*lastIndex + 1 < int (allItems.size())) 
+                visibleItems.push_back (allItems[size_t (*lastIndex + 1)]);
+            
+            if (*lastIndex + 2 < int (allItems.size()))
+                visibleItems.push_back (allItems[size_t (*lastIndex + 2)]);
+        }
+        
         return visibleItems;
     }
 
