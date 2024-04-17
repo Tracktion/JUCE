@@ -1914,10 +1914,13 @@ struct ClipRegions
             {
                 for (auto& i : clip)
                 {
-                    auto rect = i.getIntersection (area);
+                    if (i.intersects (area))
+                    {
+                        auto rect = i.getIntersection (area);
 
-                    if (! rect.isEmpty())
-                        r.handleEdgeTableRectangleFull (rect.getX(), rect.getY(), rect.getWidth(), rect.getHeight());
+                        if (! rect.isEmpty())
+                            r.handleEdgeTableRectangleFull (rect.getX(), rect.getY(), rect.getWidth(), rect.getHeight());
+                    }
                 }
             }
 
