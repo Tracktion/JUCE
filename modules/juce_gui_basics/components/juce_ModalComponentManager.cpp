@@ -202,19 +202,20 @@ void ModalComponentManager::handleAsyncUpdate()
 {
     for (int i = stack.size(); --i >= 0;)
     {
-        auto* item = stack.getUnchecked (i);
-
-        if (! item->isActive)
+        if (auto* item = stack[i])
         {
-            std::unique_ptr<ModalItem> deleter (stack.removeAndReturn (i));
-            Component::SafePointer<Component> compToDelete (item->autoDelete ? item->component : nullptr);
-
-            for (int j = item->callbacks.size(); --j >= 0;)
-                item->callbacks.getUnchecked (j)->modalStateFinished (item->returnValue);
-
-            compToDelete.deleteAndZero();
-
-            detail::ComponentHelpers::ModalComponentManagerChangeNotifier::getInstance().modalComponentManagerChanged();
+            if (! item->isActive)
+            {
+                std::unique_ptr<ModalItem> deleter (stack.removeAndReturn (i));
+                Component::SafePointer<Component> compToDelete (item->autoDelete ? item->component : nullptr);
+                
+                for (int j = item->callbacks.size(); --j >= 0;)
+                    item->callbacks.getUnchecked (j)->modalStateFinished (item->returnValue);
+                
+                compToDelete.deleteAndZero();
+                
+                detail::ComponentHelpers::ModalComponentManagerChangeNotifier::getInstance().modalComponentManagerChanged();
+            }
         }
     }
 }
