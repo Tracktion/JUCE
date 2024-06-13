@@ -34,7 +34,8 @@
 
 #if JUCE_PLUGINHOST_AU && (JUCE_MAC || JUCE_IOS)
 
-JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations",
+                                     "-Wdeprecated-anon-enum-enum-conversion")
 
 #if JUCE_MAC
 #include <AudioUnit/AUCocoaUIView.h>
