@@ -37,11 +37,7 @@ namespace juce
 
 #if JUCE_WEB_BROWSER || DOXYGEN
 
-#if    (JUCE_MAC && (defined (MAC_OS_X_VERSION_10_13) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_13))) \
-    || (JUCE_IOS && (defined (__IPHONE_11_0) && (__IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_11_0)))                \
-    || (JUCE_WINDOWS && JUCE_USE_WIN_WEBVIEW2)                                                                       \
-    || JUCE_ANDROID                                                                                                  \
-    || JUCE_LINUX
+#if JUCE_MAC || JUCE_IOS || (JUCE_WINDOWS && JUCE_USE_WIN_WEBVIEW2) || JUCE_ANDROID || JUCE_LINUX
  #define JUCE_WEB_BROWSER_RESOURCE_PROVIDER_AVAILABLE 1
 #else
  #define JUCE_WEB_BROWSER_RESOURCE_PROVIDER_AVAILABLE 0
@@ -187,8 +183,7 @@ public:
 
             /** Sets the background colour that WebView2 renders underneath all web content.
 
-                This colour must either be fully opaque or transparent. On Windows 7 this
-                colour must be opaque.
+                This colour must either be fully opaque or fully transparent.
             */
             [[nodiscard]] WinWebView2 withBackgroundColour (const Colour& colour) const
             {
