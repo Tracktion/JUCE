@@ -1303,6 +1303,9 @@ public:
     */
     virtual void updateTrackProperties (const TrackProperties& properties);
 
+    /** Gets the name of a MIDI note, if available */
+    virtual bool hasNameForMidiNoteNumber (int note, int midiChannel, juce::String& name);
+
     //==============================================================================
     /** Helper function that just converts an xml element into a binary blob.
 

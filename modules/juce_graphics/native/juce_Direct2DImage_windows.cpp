@@ -39,7 +39,6 @@ class NativeReadOnlyDataReleaser : public Image::BitmapData::BitmapDataReleaser
 {
 public:
     NativeReadOnlyDataReleaser (Image::PixelFormat pixelFormat,
-                                int lineStride,
                                 int w,
                                 int h,
                                 ComSmartPtr<ID2D1DeviceContext1> deviceContextIn,
@@ -48,7 +47,6 @@ public:
         : bitmap (Direct2DBitmap::createBitmap (deviceContextIn,
                                                 pixelFormat,
                                                 { (UINT32) w, (UINT32) h },
-                                                lineStride,
                                                 D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW))
     {
         JUCE_D2DMETRICS_SCOPED_ELAPSED_TIME(Direct2DMetricsHub::getInstance()->imageContextMetrics, mapBitmapTime)
@@ -142,7 +140,6 @@ ComSmartPtr<ID2D1Bitmap1> Direct2DPixelData::createAdapterBitmap() const
     auto bitmap = Direct2DBitmap::createBitmap (context,
                                                 pixelFormat,
                                                 { (UINT32) width, (UINT32) height },
-                                                getLineStride(),
                                                 D2D1_BITMAP_OPTIONS_TARGET);
 
     // The bitmap may be slightly too large due
@@ -190,7 +187,6 @@ void Direct2DPixelData::initBitmapDataReadOnly (Image::BitmapData& bitmap, int x
     JUCE_TRACE_LOG_D2D_IMAGE_MAP_DATA;
 
     auto releaser = std::make_unique<NativeReadOnlyDataReleaser> (pixelFormat,
-                                                                  lineStride,
                                                                   width,
                                                                   height,
                                                                   context,

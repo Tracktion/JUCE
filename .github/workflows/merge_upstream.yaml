@@ -1,0 +1,23 @@
+name: Merge Upstream
+on:
+  schedule:
+    - cron: '0 * * * *'
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Merge Upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.TOKEN }}      
+      - run: |
+          git fetch --prune --unshallow
+      - name: "Run script"
+        run: |
+          ./.github/workflows/update
+        env:
+          GH_EMAIL: ${{ secrets.GH_EMAIL }}
+          GH_NAME: ${{ secrets.GH_NAME }}

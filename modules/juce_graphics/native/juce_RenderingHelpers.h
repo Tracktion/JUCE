@@ -1860,10 +1860,13 @@ namespace ClipRegions
             {
                 for (auto& i : clip)
                 {
-                    auto rect = i.getIntersection (area);
+                    if (i.intersects (area))
+                    {
+                        auto rect = i.getIntersection (area);
 
-                    if (! rect.isEmpty())
-                        r.handleEdgeTableRectangleFull (rect.getX(), rect.getY(), rect.getWidth(), rect.getHeight());
+                        if (! rect.isEmpty())
+                            r.handleEdgeTableRectangleFull (rect.getX(), rect.getY(), rect.getWidth(), rect.getHeight());
+                    }
                 }
             }
 
@@ -2191,8 +2194,10 @@ public:
             }
             else if (! transform.isRotated)
             {
-                jassert (! replaceContents); // not implemented
-                fillTargetRect (transform.boundsAfterTransform (r.toFloat()));
+                if (replaceContents)
+                    fillTargetRect (transform.boundsAfterTransform (r.toFloat()).toNearestInt(), true);
+                else
+                    fillTargetRect (transform.boundsAfterTransform (r.toFloat()));
             }
             else
             {

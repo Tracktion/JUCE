@@ -931,6 +931,11 @@ void AudioProcessor::setCurrentProgramStateInformation (const void* data, int si
 //==============================================================================
 void AudioProcessor::updateTrackProperties (const AudioProcessor::TrackProperties&)    {}
 
+bool AudioProcessor::hasNameForMidiNoteNumber (int, int, juce::String&)
+{
+    return false;
+}
+
 //==============================================================================
 // magic number to identify memory blocks that we've stored as XML
 const uint32 magicXmlNumber = 0x21324356;

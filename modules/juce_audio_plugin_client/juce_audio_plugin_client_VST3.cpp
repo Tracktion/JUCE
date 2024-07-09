@@ -506,9 +506,29 @@ public:
         return kResultFalse;
     }
 
+    tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID, Steinberg::int32) override
+    {
+        String name;
+        for (int i = 0; i < 127; i++)
+            if (audioProcessor->hasNameForMidiNoteNumber (i, 1, name) == kResultTrue)
+                return kResultTrue;
+
+        return kResultFalse;
+    }
+
+    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16 midiNote, Vst::String128 name) override
+    {
+        String nameOut;
+        if (audioProcessor->hasNameForMidiNoteNumber (midiNote, 1, nameOut))
+        {
+            toString128 (name, nameOut);
+            return kResultTrue;
+        }
+
+        return kResultFalse;
+    }
+
     tresult PLUGIN_API getProgramInfo (Vst::ProgramListID, Steinberg::int32, Vst::CString, Vst::String128) override             { return kNotImplemented; }
-    tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID, Steinberg::int32) override                                     { return kNotImplemented; }
-    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16, Vst::String128) override    { return kNotImplemented; }
     tresult PLUGIN_API selectUnit (Vst::UnitID) override                                                                        { return kNotImplemented; }
     tresult PLUGIN_API setUnitProgramData (Steinberg::int32, Steinberg::int32, IBStream*) override                              { return kNotImplemented; }
     Vst::UnitID PLUGIN_API getSelectedUnit() override                                                                           { return Vst::kRootUnitId; }
@@ -810,19 +830,6 @@ public:
 
             updateParameterInfo();
 
-            info.stepCount = (Steinberg::int32) 0;
-
-           #if ! JUCE_FORCE_LEGACY_PARAMETER_AUTOMATION_TYPE
-            if (param.isDiscrete())
-           #endif
-            {
-                const int numSteps = param.getNumSteps();
-                info.stepCount = (Steinberg::int32) (numSteps > 0 && numSteps < 0x7fffffff ? numSteps - 1 : 0);
-            }
-
-            info.defaultNormalizedValue = param.getDefaultValue();
-            jassert (info.defaultNormalizedValue >= 0 && info.defaultNormalizedValue <= 1.0f);
-
             // Is this a meter?
             if ((((unsigned int) param.getCategory() & 0xffff0000) >> 16) == 2)
                 info.flags = Vst::ParameterInfo::kIsReadOnly;
@@ -846,9 +853,29 @@ public:
                 return true;
             };
 
-            auto anyUpdated = updateParamIfChanged (info.title,      param.getName (128));
-            anyUpdated     |= updateParamIfChanged (info.shortTitle, param.getName (8));
-            anyUpdated     |= updateParamIfChanged (info.units,      param.getLabel());
+            const auto updateParamIfScalarChanged = [] (auto& toChange, const auto newValue)
+            {
+                return ! exactlyEqual (std::exchange (toChange, newValue), newValue);
+            };
+
+            const auto newStepCount = [&]
+            {
+               #if ! JUCE_FORCE_LEGACY_PARAMETER_AUTOMATION_TYPE
+                if (! param.isDiscrete())
+                    return 0;
+               #endif
+
+                const auto numSteps = param.getNumSteps();
+                return (Steinberg::int32) (0 < numSteps && numSteps < 0x7fffffff ? numSteps - 1 : 0);
+            }();
+
+            auto anyUpdated = updateParamIfChanged (info.title, param.getName (128));
+            anyUpdated |= updateParamIfChanged (info.shortTitle, param.getName (8));
+            anyUpdated |= updateParamIfChanged (info.units, param.getLabel());
+            anyUpdated |= updateParamIfScalarChanged (info.stepCount, newStepCount);
+            anyUpdated |= updateParamIfScalarChanged (info.defaultNormalizedValue, (double) param.getDefaultValue());
+
+            jassert (0 <= info.defaultNormalizedValue && info.defaultNormalizedValue <= 1.0);
 
             return anyUpdated;
         }
@@ -1333,7 +1360,7 @@ public:
         {
             for (int32 i = 0; i < parameters.getParameterCount(); ++i)
                 if (auto* param = dynamic_cast<Param*> (parameters.getParameterByIndex (i)))
-                    if (param->updateParameterInfo() && (flags & Vst::kParamTitlesChanged) == 0)
+                    if (param->updateParameterInfo())
                         flags |= Vst::kParamTitlesChanged;
         }
 

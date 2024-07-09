@@ -1605,13 +1605,15 @@ private:
                       bool,
                       bool) override
     {
+        auto pos = bounds.getPosition();
         auto rect = componentToVST3Rect (bounds);
+
         auto constrainedRect = rect;
         view->checkSizeConstraint (&constrainedRect);
 
         // Prevent inadvertent window growth while dragging; see componentMovedOrResized below
         if (constrainedRect.getWidth() != rect.getWidth() || constrainedRect.getHeight() != rect.getHeight())
-            bounds = vst3ToComponentRect (constrainedRect);
+            bounds = vst3ToComponentRect (constrainedRect).withPosition (pos);
     }
 
     //==============================================================================
@@ -2290,14 +2292,9 @@ public:
     //==============================================================================
     struct VST3Parameter final  : public Parameter
     {
-        VST3Parameter (VST3PluginInstance& parent,
-                       Steinberg::int32 vstParameterIndex,
-                       Steinberg::Vst::ParamID parameterID,
-                       bool parameterIsAutomatable)
+        VST3Parameter (VST3PluginInstance& parent, Steinberg::int32 vstParameterIndex)
             : pluginInstance (parent),
-              vstParamIndex (vstParameterIndex),
-              paramID (parameterID),
-              automatable (parameterIsAutomatable)
+              vstParamIndex (vstParameterIndex)
         {
         }
 
@@ -2332,7 +2329,7 @@ public:
             {
                 Vst::String128 result;
 
-                if (pluginInstance.editController->getParamStringByValue (paramID, value, result) == kResultOk)
+                if (pluginInstance.editController->getParamStringByValue (cachedInfo.id, value, result) == kResultOk)
                     return toString (result).substring (0, maximumLength);
             }
 
@@ -2347,7 +2344,7 @@ public:
             {
                 Vst::ParamValue result;
 
-                if (pluginInstance.editController->getParamValueByString (paramID, toString (text), result) == kResultOk)
+                if (pluginInstance.editController->getParamValueByString (cachedInfo.id, toString (text), result) == kResultOk)
                     return (float) result;
             }
 
@@ -2356,32 +2353,34 @@ public:
 
         float getDefaultValue() const override
         {
-            return (float) getParameterInfo().defaultNormalizedValue;
+            return (float) cachedInfo.defaultNormalizedValue;
         }
 
         String getName (int /*maximumStringLength*/) const override
         {
-            return toString (getParameterInfo().title);
+            return toString (cachedInfo.title);
         }
 
         String getLabel() const override
         {
-            return toString (getParameterInfo().units);
+            return toString (cachedInfo.units);
         }
 
         bool isAutomatable() const override
         {
-            return automatable;
+            return (cachedInfo.flags & Vst::ParameterInfo::kCanAutomate) != 0;
         }
 
         bool isDiscrete() const override
         {
-            return discrete;
+            return getNumSteps() != AudioProcessor::getDefaultNumParameterSteps();
         }
 
         int getNumSteps() const override
         {
-            return numSteps;
+            const auto stepCount = cachedInfo.stepCount;
+            return stepCount == 0 ? AudioProcessor::getDefaultNumParameterSteps()
+                                  : stepCount + 1;
         }
 
         StringArray getAllValueStrings() const override
@@ -2391,28 +2390,31 @@ public:
 
         String getParameterID() const override
         {
-            return String (paramID);
+            return String (cachedInfo.id);
         }
 
-        Steinberg::Vst::ParamID getParamID() const noexcept { return paramID; }
+        Steinberg::Vst::ParamID getParamID() const noexcept { return cachedInfo.id; }
 
-    private:
+        void updateCachedInfo()
+        {
+            cachedInfo = fetchParameterInfo();
+        }
+
         Vst::ParameterInfo getParameterInfo() const
         {
+            return cachedInfo;
+        }
+
+    private:
+        Vst::ParameterInfo fetchParameterInfo() const
+        {
+            JUCE_ASSERT_MESSAGE_THREAD
             return pluginInstance.getParameterInfoForIndex (vstParamIndex);
         }
 
         VST3PluginInstance& pluginInstance;
         const Steinberg::int32 vstParamIndex;
-        const Steinberg::Vst::ParamID paramID;
-        const bool automatable;
-        const int numSteps = [&]
-        {
-            auto stepCount = getParameterInfo().stepCount;
-            return stepCount == 0 ? AudioProcessor::getDefaultNumParameterSteps()
-                                  : stepCount + 1;
-        }();
-        const bool discrete = getNumSteps() != AudioProcessor::getDefaultNumParameterSteps();
+        Vst::ParameterInfo cachedInfo = fetchParameterInfo();
     };
 
     //==============================================================================
@@ -2897,6 +2899,34 @@ public:
     }
 
     //==============================================================================
+    bool hasNameForMidiNoteNumber (int note, int /*midiChannel*/, juce::String& noteName) override
+    {
+        if (unitInfo != nullptr)
+        {
+            const int programListCount = unitInfo->getProgramListCount();
+
+            if (programListCount > 0)
+            {
+                Vst::ProgramListInfo programListInfo {};
+
+                if (unitInfo->getProgramListInfo (0, programListInfo) == kResultOk)
+                {
+                    if (unitInfo->hasProgramPitchNames (programListInfo.id, 0) == kResultTrue)
+                    {
+                        Vst::String128 name;
+                        if (unitInfo->getProgramPitchName (programListInfo.id, 0, (Steinberg::int16) note, name) == kResultTrue)
+                        {
+                            noteName = toString (name) ;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    //==============================================================================
     void updateTrackProperties (const TrackProperties& properties) override
     {
         if (trackInfoListener != nullptr)
@@ -3203,6 +3233,13 @@ public:
     {
     }
 
+    void updateParameterInfo()
+    {
+        for (auto& pair : idToParamMap)
+            if (auto* param = pair.second)
+                param->updateCachedInfo();
+    }
+
 private:
     void deactivate()
     {
@@ -3361,11 +3398,8 @@ private:
 
         for (int i = 0; i < editController->getParameterCount(); ++i)
         {
-            auto paramInfo = getParameterInfoForIndex (i);
-            auto* param = new VST3Parameter (*this,
-                                             i,
-                                             paramInfo.id,
-                                             (paramInfo.flags & Vst::ParameterInfo::kCanAutomate) != 0);
+            auto* param = new VST3Parameter (*this, i);
+            const auto paramInfo = param->getParameterInfo();
 
             if ((paramInfo.flags & Vst::ParameterInfo::kIsBypass) != 0)
                 bypassParam = param;
@@ -3795,6 +3829,9 @@ void VST3HostContext::restartComponentOnMessageThread (int32 flags)
 
     if (hasFlag (flags, Vst::kParamValuesChanged))
         plugin->resetParameters();
+
+    if (hasFlag (flags, Vst::kParamTitlesChanged))
+        plugin->updateParameterInfo();
 
     plugin->updateHostDisplay (AudioProcessorListener::ChangeDetails().withProgramChanged (true)
                                                                       .withParameterInfoChanged (true));

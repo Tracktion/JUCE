@@ -90,7 +90,11 @@ void ResizableWindow::clearContentComponent()
 {
     if (ownsContentComponent)
     {
-        contentComponent.deleteAndZero();
+        if (auto c = contentComponent)
+        {
+            contentComponent = nullptr;
+            delete c;
+        }
     }
     else
     {
