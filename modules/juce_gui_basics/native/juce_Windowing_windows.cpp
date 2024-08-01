@@ -719,23 +719,6 @@ JUCE_API double getScaleFactorForWindow (HWND h)
         return (double) localGetDPIForWindow (h) / USER_DEFAULT_SCREEN_DPI;
 
     return 1.0;
- }
-
-//==============================================================================
-static void setWindowPos (HWND hwnd, Rectangle<int> bounds, UINT flags, bool adjustTopLeft = false)
-{
-    ScopedThreadDPIAwarenessSetter setter { hwnd };
-
-    if (isPerMonitorDPIAwareWindow (hwnd))
-    {
-        if (adjustTopLeft)
-            bounds = convertLogicalScreenRectangleToPhysical (bounds, hwnd)
-                      .withPosition (Desktop::getInstance().getDisplays().logicalToPhysical (bounds.getTopLeft()));
-        else
-            bounds = convertLogicalScreenRectangleToPhysical (bounds, hwnd);
-    }
-
-    SetWindowPos (hwnd, nullptr, bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight(), flags);
 }
 
 static RECT getWindowScreenRect (HWND hwnd)
@@ -1589,15 +1572,6 @@ public:
                  info.rcWindow.right - info.rcClient.right };
     }
 
-    BorderSize<float> getScaledBorderSize() const
-    {
-        const auto physical = findPhysicalBorderSize();
-        return { (float) physical.getTop()    / (float) scaleFactor,
-                 (float) physical.getLeft()   / (float) scaleFactor,
-                 (float) physical.getBottom() / (float) scaleFactor,
-                 (float) physical.getRight()  / (float) scaleFactor };
-    }
-
     void updateBorderSize()
     {
         if (renderContext == nullptr)
@@ -1617,6 +1591,9 @@ public:
         if (inHandlePositionChanged)
             return;
 
+        if (isNowFullScreen != isFullScreen())
+            setFullScreen (isNowFullScreen);
+
         // This is more of a guess than a certainty, but if we've captured the mouse and we're also
         // updating the bounds, there's a good chance we're in a client-initiated resize.
         // The resizing flag will be unset by WM_CAPTURECHANGED.
@@ -1625,8 +1602,6 @@ public:
                 renderContext->setResizing (true);
 
         const ScopedValueSetter<bool> scope (shouldIgnoreModalDismiss, true);
-
-        fullScreen = isNowFullScreen;
 
         const auto borderSize = findPhysicalBorderSize();
         auto newBounds = borderSize.addedTo ([&]
@@ -1687,20 +1662,32 @@ public:
     {
         if (parentToAddTo == nullptr)
         {
-            // Depending on the desktop scale factor, the physical size of the window may not map to
-            // an integral client-area size.
-            // In this case, we always round the width and height of the client area up to the next
-            // integer.
-            // This means that we may end up clipping off up to one logical pixel under the physical
-            // window border, but this is preferable to displaying an uninitialised/unpainted
-            // region of the client area.
-            const auto physicalBorder = findPhysicalBorderSize();
+            if (hasTitleBar())
+            {
+                // Depending on the desktop scale factor, the physical size of the window may not map to
+                // an integral client-area size.
+                // In this case, we always round the width and height of the client area up to the next
+                // integer.
+                // This means that we may end up clipping off up to one logical pixel under the physical
+                // window border, but this is preferable to displaying an uninitialised/unpainted
+                // region of the client area.
+                const auto physicalBorder = findPhysicalBorderSize();
 
-            const auto physicalBounds = D2DUtilities::toRectangle (getWindowScreenRect (hwnd));
-            const auto physicalClient = physicalBorder.subtractedFrom (physicalBounds);
-            const auto logicalClient = convertPhysicalScreenRectangleToLogical (physicalClient.toFloat(), hwnd);
-            const auto snapped = logicalClient.withPosition (logicalClient.getPosition().roundToInt().toFloat()).getSmallestIntegerContainer();
-            return snapped;
+                const auto physicalBounds = D2DUtilities::toRectangle (getWindowScreenRect (hwnd));
+                const auto physicalClient = physicalBorder.subtractedFrom (physicalBounds);
+                const auto logicalClient = convertPhysicalScreenRectangleToLogical (physicalClient.toFloat(), hwnd);
+                const auto snapped = logicalClient.withPosition (logicalClient.getPosition().roundToInt().toFloat()).getSmallestIntegerContainer();
+                return snapped;
+            }
+
+            RECT rect{};
+            GetClientRect (hwnd, &rect);
+            auto points = readUnaligned<std::array<POINT, 2>> (&rect);
+            MapWindowPoints (hwnd, nullptr, points.data(), (UINT) points.size());
+
+            const auto mappedRect = readUnaligned<RECT> (points.data());
+            const auto logicalClient = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (mappedRect), hwnd);
+            return logicalClient;
         }
 
         auto localBounds = D2DUtilities::toRectangle (getWindowClientRect (hwnd));
@@ -1776,10 +1763,13 @@ public:
             if (constrainer != nullptr)
                 constrainer->resizeStart();
 
-            fullScreen = shouldBeFullScreen;
             const WeakReference<Component> deletionChecker (&component);
 
-            if (! fullScreen)
+            if (shouldBeFullScreen)
+            {
+                ShowWindow (hwnd, SW_SHOWMAXIMIZED);
+            }
+            else
             {
                 auto boundsCopy = lastNonFullscreenBounds;
 
@@ -1787,10 +1777,6 @@ public:
 
                 if (! boundsCopy.isEmpty())
                     setBounds (detail::ScalingHelpers::scaledScreenPosToUnscaled (component, boundsCopy), false);
-            }
-            else
-            {
-                ShowWindow (hwnd, SW_SHOWMAXIMIZED);
             }
 
             if (deletionChecker != nullptr)
@@ -2290,7 +2276,7 @@ private:
     std::unique_ptr<DropShadower> shadower;
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
-    bool fullScreen = false, isDragging = false, isMouseOver = false,
+    bool isDragging = false, isMouseOver = false,
          hasCreatedCaret = false, constrainerIsResizing = false;
     IconConverters::IconPtr currentWindowIcon;
     FileDropTarget* dropTarget = nullptr;
@@ -3360,16 +3346,7 @@ private:
 
     bool isConstrainedNativeWindow() const
     {
-        return constrainer != nullptr
-                && (styleFlags & windowIsResizable) != 0
-                && ! isKioskMode();
-    }
-
-    Rectangle<int> getCurrentScaledBounds() const
-    {
-        const auto windowBorder = findPhysicalBorderSize().multipliedBy (1.0 / scaleFactor);
-        const auto unscaled = windowBorder.addedTo (detail::ScalingHelpers::scaledScreenPosToUnscaled (component, component.getBounds()));
-        return detail::ScalingHelpers::unscaledScreenPosToScaled (component, unscaled);
+        return constrainer != nullptr && ! isKioskMode();
     }
 
     LRESULT handleSizeConstraining (RECT& r, const WPARAM wParam)
@@ -3514,6 +3491,7 @@ private:
                 return true;
         }
 
+        updateBorderSize();
         handleMovedOrResized();
         updateCurrentMonitorAndRefreshVBlankDispatcher();
 
@@ -3665,11 +3643,6 @@ private:
     void doSettingChange()
     {
         forceDisplayUpdate();
-
-        if (fullScreen && ! isMinimised())
-            setWindowPos (hwnd, detail::ScalingHelpers::scaledScreenPosToUnscaled (component, Desktop::getInstance().getDisplays()
-                                                                                              .getDisplayForRect (component.getScreenBounds())->userArea),
-                          SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOSENDCHANGING);
 
         auto* dispatcher = VBlankDispatcher::getInstance();
         dispatcher->reconfigureDisplays();
@@ -3914,18 +3887,29 @@ private:
 
             case WM_NCCALCSIZE:
             {
-                auto* rect = (RECT*) lParam;
-
-                if (renderContext != nullptr)
-                    renderContext->setSize (rect->right - rect->left, rect->bottom - rect->top);
-
-                if (! wParam)
+                // If we're using the native titlebar, then the default window proc behaviour will
+                // do the right thing.
+                if (hasTitleBar())
                     break;
 
-                if (! hasTitleBar() && windowUsesNativeShadow())
-                    return 0;
+                auto* param = (RECT*) lParam;
 
-                break;
+                // If we're not using a native titlebar, and the window is maximised, then the
+                // proposed window may be a bit bigger than the available space. Remove the padding
+                // so that the client area exactly fills the available space.
+                if (isFullScreen())
+                {
+                    const auto padX = -param->left;
+                    const auto padY = -param->top;
+
+                    param->left  += padX;
+                    param->right -= padX;
+
+                    param->top    += padY;
+                    param->bottom -= padY;
+                }
+
+                return 0;
             }
 
             //==============================================================================
@@ -4016,9 +4000,8 @@ private:
 
                 if ((wPos.flags & SWP_NOMOVE) != 0 && (wPos.flags & SWP_NOSIZE) != 0)
                     startTimer (100);
-                else
-                    if (handlePositionChanged())
-                        return 0;
+                else if (handlePositionChanged())
+                    return 0;
             }
             break;
 
