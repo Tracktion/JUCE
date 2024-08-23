@@ -1019,8 +1019,18 @@ public:
 
     std::unique_ptr<ImageType> createType() const override
     {
-        // WindowsBitmapImage needs to be a software bitmap, not a D2D bitmap
-        return std::make_unique<SoftwareImageType>();
+        // This type only exists to return a type ID that's different to the SoftwareImageType's ID,
+        // so that `SoftwareImageType{}.convert (windowsBitmapImage)` works.
+        // If we return SoftwareImageType here, then SoftwareImageType{}.convert() will compare the
+        // type IDs and assume the source image is already of the correct type.
+        struct Type : public ImageType
+        {
+            int getTypeID() const override { return ByteOrder::makeInt ('w', 'b', 'i', 't'); }
+            ImagePixelData::Ptr create (Image::PixelFormat, int, int, bool) const override { return {}; }
+            Image convert (const Image&) const override { return {}; }
+        };
+
+        return std::make_unique<Type>();
     }
 
     std::unique_ptr<LowLevelGraphicsContext> createLowLevelContext() override
@@ -1054,38 +1064,40 @@ public:
         return newImage.getPixelData();
     }
 
-    void blitToWindow (HWND hwnd, HDC dc, bool transparent, int x, int y, uint8 layeredWindowAlpha) noexcept
+    static void updateLayeredWindow (HDC sourceHdc, HWND hwnd, Point<int> pt, float constantAlpha)
+    {
+        const auto windowBounds = getWindowScreenRect (hwnd);
+
+        auto p = D2DUtilities::toPOINT (pt);
+        POINT pos = { windowBounds.left, windowBounds.top };
+        SIZE size = { windowBounds.right - windowBounds.left,
+                      windowBounds.bottom - windowBounds.top };
+
+        BLENDFUNCTION bf { AC_SRC_OVER, 0, (BYTE) (255.0f * constantAlpha), AC_SRC_ALPHA };
+
+        UpdateLayeredWindow (hwnd, nullptr, &pos, &size, sourceHdc, &p, 0, &bf, ULW_ALPHA);
+    }
+
+    void updateLayeredWindow (HWND hwnd, Point<int> pt, float constantAlpha) const noexcept
+    {
+        updateLayeredWindow (hdc, hwnd, pt, constantAlpha);
+    }
+
+    void blitToDC (HDC dc, int x, int y) const noexcept
     {
         SetMapMode (dc, MM_TEXT);
 
-        if (transparent)
-        {
-            auto windowBounds = getWindowScreenRect (hwnd);
-
-            POINT p = { -x, -y };
-            POINT pos = { windowBounds.left, windowBounds.top };
-            SIZE size = { windowBounds.right - windowBounds.left,
-                          windowBounds.bottom - windowBounds.top };
-
-            BLENDFUNCTION bf;
-            bf.AlphaFormat = 1 /*AC_SRC_ALPHA*/;
-            bf.BlendFlags = 0;
-            bf.BlendOp = AC_SRC_OVER;
-            bf.SourceConstantAlpha = layeredWindowAlpha;
-
-            [[maybe_unused]] auto ok = UpdateLayeredWindow (hwnd, nullptr, &pos, &size, hdc, &p, 0, &bf, 2 /*ULW_ALPHA*/);
-            jassert (ok);
-        }
-        else
-        {
-            StretchDIBits (dc,
-                           x, y, width, height,
-                           0, 0, width, height,
-                           bitmapData, (const BITMAPINFO*) &bitmapInfo,
-                           DIB_RGB_COLORS, SRCCOPY);
-        }
+        StretchDIBits (dc,
+                       x, y, width, height,
+                       0, 0, width, height,
+                       bitmapData, (const BITMAPINFO*) &bitmapInfo,
+                       DIB_RGB_COLORS, SRCCOPY);
     }
 
+    HBITMAP getHBITMAP() const { return hBitmap; }
+    HDC getHDC() const { return hdc; }
+
+private:
     HBITMAP hBitmap;
     HGDIOBJ previousBitmap;
     BITMAPV4HEADER bitmapInfo;
@@ -1094,7 +1106,6 @@ public:
     int pixelStride, lineStride;
     uint8* imageData;
 
-private:
     static bool isGraphicsCard32Bit()
     {
         ScopedDeviceContext deviceContext { nullptr };
@@ -1103,40 +1114,6 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WindowsBitmapImage)
 };
-
-//==============================================================================
-static Image createGDISnapshotOfNativeWindow (void* nativeWindowHandle)
-{
-    auto hwnd = (HWND) nativeWindowHandle;
-
-    auto r = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (getWindowScreenRect (hwnd)), hwnd);
-    const auto w = r.getWidth();
-    const auto h = r.getHeight();
-
-    WindowsBitmapImage::Ptr nativeBitmap = new WindowsBitmapImage (Image::RGB, w, h, true);
-    Image bitmap (nativeBitmap);
-
-    ScopedDeviceContext deviceContext { hwnd };
-
-    if (isPerMonitorDPIAwareProcess())
-    {
-        auto scale = getScaleFactorForWindow (hwnd);
-        auto prevStretchMode = SetStretchBltMode (nativeBitmap->hdc, HALFTONE);
-        SetBrushOrgEx (nativeBitmap->hdc, 0, 0, nullptr);
-
-        StretchBlt (nativeBitmap->hdc, 0, 0, w, h,
-                    deviceContext.dc, 0, 0, roundToInt (w * scale), roundToInt (h * scale),
-                    SRCCOPY);
-
-        SetStretchBltMode (nativeBitmap->hdc, prevStretchMode);
-    }
-    else
-    {
-        BitBlt (nativeBitmap->hdc, 0, 0, w, h, deviceContext.dc, 0, 0, SRCCOPY);
-    }
-
-    return SoftwareImageType().convert (bitmap);
-}
 
 //==============================================================================
 namespace IconConverters
@@ -1274,7 +1251,7 @@ namespace IconConverters
         info.xHotspot = (DWORD) hotspotX;
         info.yHotspot = (DWORD) hotspotY;
         info.hbmMask = mask;
-        info.hbmColor = nativeBitmap->hBitmap;
+        info.hbmColor = nativeBitmap->getHBITMAP();
 
         auto hi = CreateIconIndirect (&info);
         DeleteObject (mask);
@@ -1428,7 +1405,7 @@ struct RenderContext
     virtual const char* getName() const = 0;
 
     /*  The following functions will all be called by the peer to update the state of the renderer. */
-    virtual void setAlpha (float) = 0;
+    virtual void updateConstantAlpha() = 0;
     virtual void handlePaintMessage() = 0;
     virtual void repaint (const Rectangle<int>& area) = 0;
     virtual void dispatchDeferredRepaints() = 0;
@@ -1541,8 +1518,12 @@ public:
 
     void repaintNowIfTransparent()
     {
-        if (isNotOpaque() && lastPaintTime > 0 && Time::getMillisecondCounter() > lastPaintTime + 30)
+        if (getTransparencyKind() == TransparencyKind::perPixel
+            && lastPaintTime > 0
+            && Time::getMillisecondCounter() > lastPaintTime + 30)
+        {
             handlePaintMessage();
+        }
     }
 
     std::optional<BorderSize<int>> getCustomBorderSize() const
@@ -1618,7 +1599,7 @@ public:
                     .withPosition (Desktop::getInstance().getDisplays().logicalToPhysical (bounds.getTopLeft()));
         }());
 
-        if (isNotOpaque())
+        if (getTransparencyKind() == TransparencyKind::perPixel)
         {
             if (auto parentHwnd = GetParent (hwnd))
             {
@@ -1680,13 +1661,7 @@ public:
                 return snapped;
             }
 
-            RECT rect{};
-            GetClientRect (hwnd, &rect);
-            auto points = readUnaligned<std::array<POINT, 2>> (&rect);
-            MapWindowPoints (hwnd, nullptr, points.data(), (UINT) points.size());
-
-            const auto mappedRect = readUnaligned<RECT> (points.data());
-            const auto logicalClient = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (mappedRect), hwnd);
+            const auto logicalClient = convertPhysicalScreenRectangleToLogical (getClientRectInScreen(), hwnd);
             return logicalClient;
         }
 
@@ -1700,7 +1675,7 @@ public:
 
     Point<int> getScreenPosition() const
     {
-        return convertPhysicalScreenRectangleToLogical (findPhysicalBorderSize().subtractedFrom (D2DUtilities::toRectangle (getWindowScreenRect (hwnd))), hwnd).getPosition();
+        return convertPhysicalScreenPointToLogical (getClientRectInScreen().getPosition(), hwnd);
     }
 
     Point<float> localToGlobal (Point<float> relativePosition) override  { return relativePosition + getScreenPosition().toFloat(); }
@@ -1709,30 +1684,34 @@ public:
     using ComponentPeer::localToGlobal;
     using ComponentPeer::globalToLocal;
 
-    bool isLayeredWindowStyle() const noexcept
+    enum class TransparencyKind
     {
-        return (GetWindowLong (hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) != 0;
+        perPixel,
+        constant,
+        opaque,
+    };
+
+    TransparencyKind getTransparencyKind() const
+    {
+        if (hasTitleBar())
+        {
+            // If you hit this assertion, you're trying to create a window with a native titlebar
+            // and per-pixel transparency. If you want a semi-transparent window, then remove the
+            // native title bar. Otherwise, ensure that the window's component is opaque.
+            jassert (transparencyKind != TransparencyKind::perPixel);
+            return transparencyKind == TransparencyKind::perPixel ? TransparencyKind::opaque
+                                                                  : TransparencyKind::constant;
+        }
+
+        return transparencyKind;
     }
 
-    void setLayeredWindowStyle (bool layered) noexcept
+    void setAlpha (float) override
     {
-        auto exStyle = GetWindowLong (hwnd, GWL_EXSTYLE);
+        setLayeredWindow();
 
-        if (layered)
-            exStyle |= WS_EX_LAYERED;
-        else
-            exStyle &= ~WS_EX_LAYERED;
-
-        SetWindowLong (hwnd, GWL_EXSTYLE, exStyle);
-    }
-
-    void setAlpha (float newAlpha) override
-    {
-        if (renderContext == nullptr)
-            return;
-
-        const ScopedValueSetter<bool> scope (shouldIgnoreModalDismiss, true);
-        renderContext->setAlpha (newAlpha);
+        if (renderContext != nullptr)
+            renderContext->updateConstantAlpha();
     }
 
     void setMinimised (bool shouldBeMinimised) override
@@ -1798,6 +1777,19 @@ public:
         return wp.showCmd == SW_SHOWMAXIMIZED;
     }
 
+    Rectangle<int> getClientRectInScreen() const
+    {
+        ScopedThreadDPIAwarenessSetter setter { hwnd };
+
+        RECT rect{};
+        GetClientRect (hwnd, &rect);
+        auto points = readUnaligned<std::array<POINT, 2>> (&rect);
+        MapWindowPoints (hwnd, nullptr, points.data(), (UINT) points.size());
+        const auto result = readUnaligned<RECT> (&points);
+
+        return D2DUtilities::toRectangle (result);
+    }
+
     bool contains (Point<int> localPos, bool trueIfInAChildWindow) const override
     {
         auto r = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (getWindowScreenRect (hwnd)), hwnd);
@@ -1808,17 +1800,7 @@ public:
         const auto screenPos = convertLogicalScreenPointToPhysical (localPos + getScreenPosition(), hwnd);
 
         if (trueIfInAChildWindow)
-        {
-            // Quick check to see whether the point is inside the client bounds
-            RECT rect;
-            GetClientRect (hwnd, &rect);
-            POINT points[2];
-            memcpy (points, &rect, sizeof (points));
-            MapWindowPoints (hwnd, nullptr, points, (UINT) std::size (points));
-            memcpy (&rect, points, sizeof (points));
-
-            return PtInRect (&rect, D2DUtilities::toPOINT (screenPos));
-        }
+            return getClientRectInScreen().contains (screenPos);
 
         auto w = WindowFromPoint (D2DUtilities::toPOINT (screenPos));
 
@@ -2281,6 +2263,7 @@ private:
     IconConverters::IconPtr currentWindowIcon;
     FileDropTarget* dropTarget = nullptr;
     UWPUIViewSettings uwpViewSettings;
+    TransparencyKind transparencyKind = TransparencyKind::opaque;
    #if JUCE_MODULE_AVAILABLE_juce_audio_plugin_client
     ModifierKeyProvider* modProvider = nullptr;
    #endif
@@ -2440,7 +2423,6 @@ private:
         const auto hasMax = (styleFlags & windowHasMaximiseButton) != 0;
         const auto appearsOnTaskbar = (styleFlags & windowAppearsOnTaskbar) != 0;
         const auto resizable = (styleFlags & windowIsResizable) != 0;
-        const auto transparent = (styleFlags & windowIsSemiTransparent) != 0;
 
         if (parentToAddTo != nullptr)
         {
@@ -2448,15 +2430,24 @@ private:
         }
         else
         {
-            type |= titled ? (WS_OVERLAPPED | WS_CAPTION) : WS_POPUP;
-            type |= hasClose ? (WS_SYSMENU | WS_CAPTION) : 0;
-            type |= hasMin ? (WS_MINIMIZEBOX | WS_CAPTION) : 0;
-            type |= hasMax ? (WS_MAXIMIZEBOX | WS_CAPTION) : 0;
-            type |= resizable || windowUsesNativeShadow() ? WS_THICKFRAME : 0;
+            if (titled || windowUsesNativeShadow())
+            {
+                type |= titled ? (WS_OVERLAPPED | WS_CAPTION) : WS_POPUP;
+                type |= hasClose ? (WS_SYSMENU | WS_CAPTION) : 0;
+                type |= hasMin ? (WS_MINIMIZEBOX | WS_CAPTION | WS_SYSMENU) : 0;
+                type |= hasMax ? (WS_MAXIMIZEBOX | WS_CAPTION | WS_SYSMENU) : 0;
+                type |= resizable || windowUsesNativeShadow() ? WS_THICKFRAME : 0;
+            }
+            else
+            {
+                // Transparent windows need WS_POPUP and not WS_OVERLAPPED | WS_CAPTION, otherwise
+                // the top corners of the window will get rounded unconditionally.
+                // Unfortunately, this disables nice mouse handling for the caption area.
+                type |= WS_POPUP;
+            }
+
             exstyle |= appearsOnTaskbar ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW;
         }
-
-        exstyle |= transparent ? WS_EX_LAYERED : 0;
 
         hwnd = CreateWindowEx (exstyle, WindowClassHolder::getInstance()->getWindowClassName(),
                                L"", type, 0, 0, 0, 0, parentToAddTo, nullptr,
@@ -2586,11 +2577,6 @@ private:
         return component.isOpaque();
     }
 
-    bool isNotOpaque() const
-    {
-        return ! component.isOpaque();
-    }
-
     bool windowUsesNativeShadow() const
     {
         return hasTitleBar()
@@ -2634,6 +2620,42 @@ private:
             changeMessageFilter (hwnd, WM_COPYDATA, 1 /*MSGFLT_ALLOW*/, nullptr);
             changeMessageFilter (hwnd, 0x49, 1 /*MSGFLT_ALLOW*/, nullptr);
         }
+    }
+
+    static TransparencyKind computeTransparencyKind (const Component& comp)
+    {
+        if (! comp.isOpaque())
+            return TransparencyKind::perPixel;
+
+        if (comp.getAlpha() < 1.0f)
+            return TransparencyKind::constant;
+
+        return TransparencyKind::opaque;
+    }
+
+    void setLayeredWindow()
+    {
+        const auto old = std::exchange (transparencyKind, computeTransparencyKind (component));
+
+        if (old == getTransparencyKind())
+            return;
+
+        const auto prev = GetWindowLongPtr (hwnd, GWL_EXSTYLE);
+
+        // UpdateLayeredWindow will fail if SetLayeredWindowAttributes has previously been called
+        // without unsetting and resetting the layering style bit.
+        // UpdateLayeredWindow is used for perPixel windows; SetLayeredWindowAttributes is used for
+        // windows with a constant alpha but otherwise "opaque" contents (i.e. component.isOpaque()
+        // returns true but component.getAlpha() is less than 1.0f).
+        if (getTransparencyKind() == TransparencyKind::perPixel)
+            SetWindowLongPtr (hwnd, GWL_EXSTYLE, prev & ~WS_EX_LAYERED);
+
+        const auto newStyle = getTransparencyKind() == TransparencyKind::opaque
+                              ? (prev & ~WS_EX_LAYERED)
+                              : (prev | WS_EX_LAYERED);
+
+        SetWindowLongPtr (hwnd, GWL_EXSTYLE, newStyle);
+        RedrawWindow (hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
 
     //==============================================================================
@@ -3477,6 +3499,19 @@ private:
         yes
     };
 
+    static void updateVBlankDispatcherForAllPeers (ForceRefreshDispatcher force = ForceRefreshDispatcher::no)
+    {
+        // There's an edge case where only top-level windows seem to get WM_SETTINGCHANGE
+        // messages, which means that if we have a plugin that opens its own top-level/desktop
+        // window, then the extra window might get a SETTINGCHANGE but the plugin window may not.
+        // If we only update the vblank dispatcher for windows that get a SETTINGCHANGE, we might
+        // miss child windows, and those windows won't be able to repaint.
+
+        for (auto i = getNumPeers(); --i >= 0;)
+            if (auto* peer = static_cast<HWNDComponentPeer*> (getPeer (i)))
+                peer->updateCurrentMonitorAndRefreshVBlankDispatcher (force);
+    }
+
     void updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher force = ForceRefreshDispatcher::no)
     {
         auto monitor = MonitorFromWindow (hwnd, MONITOR_DEFAULTTONULL);
@@ -3655,7 +3690,7 @@ private:
 
         auto* dispatcher = VBlankDispatcher::getInstance();
         dispatcher->reconfigureDisplays();
-        updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher::yes);
+        updateVBlankDispatcherForAllPeers (ForceRefreshDispatcher::yes);
     }
 
     //==============================================================================
@@ -4678,17 +4713,14 @@ Image createSnapshotOfNativeWindow (void* nativeWindowHandle)
     return {};
 }
 
-class GDIContext : public RenderContext
+class GDIRenderContext : public RenderContext
 {
 public:
     static constexpr auto name = "Software Renderer";
 
-    explicit GDIContext (HWNDComponentPeer& peerIn)
+    explicit GDIRenderContext (HWNDComponentPeer& peerIn)
         : peer (peerIn)
     {
-        peer.setLayeredWindowStyle (false);
-
-        peer.setAlpha (layeredWindowAlpha / 255.0f);
         RedrawWindow (peer.getHWND(),
                       nullptr,
                       nullptr,
@@ -4697,31 +4729,9 @@ public:
 
     const char* getName() const override { return name; }
 
-    void setAlpha (float newAlpha) override
+    void updateConstantAlpha() override
     {
-        auto intAlpha = (uint8) jlimit (0, 255, (int) (newAlpha * 255.0f));
-
-        if (peer.getComponent().isOpaque())
-        {
-            if (newAlpha < 1.0f)
-            {
-                peer.setLayeredWindowStyle (true);
-                [[maybe_unused]] auto ok = SetLayeredWindowAttributes (peer.getHWND(), RGB (0, 0, 0), intAlpha, LWA_ALPHA);
-                jassert (ok);
-            }
-            else
-            {
-                peer.setLayeredWindowStyle (false);
-                RedrawWindow (peer.getHWND(), nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
-            }
-        }
-        else
-        {
-            peer.setLayeredWindowStyle (true);
-
-            layeredWindowAlpha = intAlpha;
-            peer.getComponent().repaint();
-        }
+        InvalidateRect (peer.getHWND(), nullptr, false);
     }
 
     void handlePaintMessage() override
@@ -4782,14 +4792,19 @@ public:
         WeakReference localRef (&peer.getComponent());
         MSG m;
 
-        if (! peer.getComponent().isOpaque() || PeekMessage (&m, peer.getHWND(), WM_PAINT, WM_PAINT, PM_REMOVE))
+        if (peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::perPixel
+            || PeekMessage (&m, peer.getHWND(), WM_PAINT, WM_PAINT, PM_REMOVE))
+        {
             if (localRef != nullptr) // (the PeekMessage call can dispatch messages, which may delete this comp)
                 handlePaintMessage();
+        }
     }
 
     Image createSnapshot() override
     {
-        return createGDISnapshotOfNativeWindow (peer.getHWND());
+        return peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::perPixel
+             ? createSnapshotOfLayeredWindow()
+             : createSnapshotOfNormalWindow();
     }
 
     void setSize (int, int) override {}
@@ -4800,6 +4815,64 @@ public:
     void handleShowWindow() override {}
 
 private:
+    // If we've called UpdateLayeredWindow to display the window contents, retrieving the
+    // contents of the window DC will fail.
+    // Instead, we produce a fresh render of the window into a temporary image.
+    // Child windows will not be included.
+    Image createSnapshotOfLayeredWindow() const
+    {
+        const auto rect = peer.getClientRectInScreen();
+        Image result { Image::ARGB, rect.getWidth(), rect.getHeight(), true, SoftwareImageType{} };
+
+        {
+            auto context = peer.getComponent()
+                               .getLookAndFeel()
+                               .createGraphicsContext (result, {}, rect.withZeroOrigin());
+
+            context->addTransform (AffineTransform::scale ((float) peer.getPlatformScaleFactor()));
+            peer.handlePaint (*context);
+        }
+
+        return result;
+    }
+
+    // If UpdateLayeredWindow hasn't been called, then we can blit the window contents directly
+    // from the window's DC.
+    Image createSnapshotOfNormalWindow() const
+    {
+        auto hwnd = peer.getHWND();
+
+        auto r = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (getWindowScreenRect (hwnd)), hwnd);
+        const auto w = r.getWidth();
+        const auto h = r.getHeight();
+
+        WindowsBitmapImage::Ptr nativeBitmap = new WindowsBitmapImage (Image::RGB, w, h, true);
+        Image bitmap (nativeBitmap);
+
+        ScopedDeviceContext deviceContext { hwnd };
+
+        const auto hdc = nativeBitmap->getHDC();
+
+        if (isPerMonitorDPIAwareProcess())
+        {
+            auto scale = getScaleFactorForWindow (hwnd);
+            auto prevStretchMode = SetStretchBltMode (hdc, HALFTONE);
+            SetBrushOrgEx (hdc, 0, 0, nullptr);
+
+            StretchBlt (hdc, 0, 0, w, h,
+                        deviceContext.dc, 0, 0, roundToInt (w * scale), roundToInt (h * scale),
+                        SRCCOPY);
+
+            SetStretchBltMode (hdc, prevStretchMode);
+        }
+        else
+        {
+            BitBlt (hdc, 0, 0, w, h, deviceContext.dc, 0, 0, SRCCOPY);
+        }
+
+        return SoftwareImageType().convert (bitmap);
+    }
+
     void performPaint (HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
     {
         int x = paintStruct.rcPaint.left;
@@ -4807,9 +4880,9 @@ private:
         int w = paintStruct.rcPaint.right - x;
         int h = paintStruct.rcPaint.bottom - y;
 
-        const bool transparent = ! peer.getComponent().isOpaque();
+        const auto perPixelTransparent = peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::perPixel;
 
-        if (transparent)
+        if (perPixelTransparent)
         {
             // it's not possible to have a transparent window with a title bar at the moment!
             jassert (! peer.hasTitleBar());
@@ -4822,14 +4895,14 @@ private:
 
         if (w > 0 && h > 0)
         {
-            Image& offscreenImage = offscreenImageGenerator.getImage (transparent, w, h);
+            Image& offscreenImage = offscreenImageGenerator.getImage (perPixelTransparent, w, h);
 
             RectangleList<int> contextClip;
             const Rectangle<int> clipBounds (w, h);
 
             bool needToPaintAll = true;
 
-            if (regionType == COMPLEXREGION && ! transparent)
+            if (regionType == COMPLEXREGION && ! perPixelTransparent)
             {
                 HRGN clipRgn = CreateRectRgnIndirect (&paintStruct.rcPaint);
                 CombineRgn (rgn, rgn, clipRgn, RGN_AND);
@@ -4882,7 +4955,7 @@ private:
 
             if (! contextClip.isEmpty())
             {
-                if (transparent)
+                if (perPixelTransparent)
                     for (auto& i : contextClip)
                         offscreenImage.clear (i);
 
@@ -4895,7 +4968,19 @@ private:
                     peer.handlePaint (*context);
                 }
 
-                static_cast<WindowsBitmapImage*> (offscreenImage.getPixelData())->blitToWindow (peer.getHWND(), dc, transparent, x, y, layeredWindowAlpha);
+                auto* image = static_cast<WindowsBitmapImage*> (offscreenImage.getPixelData());
+
+                if (perPixelTransparent)
+                {
+                    image->updateLayeredWindow (peer.getHWND(), { x, y }, peer.getComponent().getAlpha());
+                }
+                else
+                {
+                    image->blitToDC (dc, x, y);
+
+                    if (peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::constant)
+                        SetLayeredWindowAttributes (peer.getHWND(), {}, (BYTE) (255.0f * peer.getComponent().getAlpha()), LWA_ALPHA);
+                }
             }
 
             if (childClipInfo.savedDC != 0)
@@ -4965,53 +5050,33 @@ private:
     HWNDComponentPeer& peer;
     TemporaryImage offscreenImageGenerator;
     RectangleList<int> deferredRepaints;
-    uint8 layeredWindowAlpha = 255;
     bool resizing = false;
 };
 
-class D2DContext : public RenderContext
+class D2DRenderContext : public RenderContext
 {
 public:
     static constexpr auto name = "Direct2D";
 
-    explicit D2DContext (HWNDComponentPeer& peerIn)
-        : peer (peerIn),
-          direct2DContext (std::make_unique<Direct2DHwndContext> (peer.getHWND(), peer.getComponent().isOpaque()))
+    explicit D2DRenderContext (HWNDComponentPeer& peerIn)
+        : peer (peerIn)
     {
-        // Layered windows use the contents of the window back buffer to automatically determine mouse hit testing
-        // But - Direct2D doesn't fill the window back buffer so the hit tests pass through for transparent windows
-        //
-        // Layered windows can use a single RGB colour as a transparency key (like a green screen). So - choose an
-        // RGB color as the key and call SetLayeredWindowAttributes with LWA_COLORKEY and the key colour.
-        //
-        // Then, use an ID2D1HwndRenderTarget when resizing the window to flush the redirection bitmap to that same
-        // RGB color.
-        //
-        // Setting the window class background brush and handling WM_ERASEBKGND didn't work; Windows keeps filling
-        // the redirection bitmap in with solid black when the window resizes.
-        //
-        // Also - only certain colour values seem to work for the transparency key; RGB(0, 0, 1) seems OK
-        if (peer.getComponent().isOpaque())
-            return;
-
-        peer.setLayeredWindowStyle (true);
-
-        auto backgroundKeyColour = Direct2DHwndContext::getBackgroundTransparencyKeyColour();
-        [[maybe_unused]] auto ok = SetLayeredWindowAttributes (peer.getHWND(),
-                                                               RGB (backgroundKeyColour.getRed(),
-                                                                    backgroundKeyColour.getGreen(),
-                                                                    backgroundKeyColour.getBlue()),
-                                                               255,
-                                                               LWA_COLORKEY);
-        jassert (ok);
     }
 
     const char* getName() const override { return name; }
 
-    void setAlpha (float newAlpha) override
+    void updateConstantAlpha() override
     {
-        direct2DContext->setWindowAlpha (newAlpha);
-        peer.getComponent().repaint();
+        const auto transparent = peer.getTransparencyKind() != HWNDComponentPeer::TransparencyKind::opaque;
+
+        if (transparent != direct2DContext->supportsTransparency())
+        {
+            direct2DContext.reset();
+            direct2DContext = getContextForPeer (peer);
+        }
+
+        if (direct2DContext->supportsTransparency())
+            direct2DContext->updateAlpha();
     }
 
     void handlePaintMessage() override
@@ -5020,7 +5085,10 @@ public:
         auto paintStartTicks = Time::getHighResolutionTicks();
        #endif
 
-        direct2DContext->addInvalidWindowRegionToDeferredRepaints();
+        updateRegion.findRECTAndValidate (peer.getHWND());
+
+        for (const auto& rect : updateRegion.getRects())
+            repaint (D2DUtilities::toRectangle (rect));
 
        #if JUCE_DIRECT2D_METRICS
         lastPaintStartTicks = paintStartTicks;
@@ -5071,6 +5139,336 @@ public:
     }
 
 private:
+    struct WrappedD2DHwndContextBase
+    {
+        virtual ~WrappedD2DHwndContextBase() = default;
+        virtual void addDeferredRepaint (Rectangle<int> area) = 0;
+        virtual Image createSnapshot() const = 0;
+        virtual void setResizing (bool x) = 0;
+        virtual bool getResizing() const = 0;
+        virtual void setSize (int w, int h) = 0;
+        virtual void handleShowWindow() = 0;
+        virtual LowLevelGraphicsContext* startFrame (float dpiScale) = 0;
+        virtual void endFrame() = 0;
+        virtual bool supportsTransparency() const = 0;
+        virtual void updateAlpha() = 0;
+        virtual Direct2DMetrics::Ptr getMetrics() const = 0;
+    };
+
+    /** This is a D2D context that uses a swap chain for presentation.
+        D2D contexts that use a swapchain can be made transparent using DirectComposition, but this
+        ends up causing other problems in JUCE, such as:
+        - The window redirection bitmap also needs to be disabled, which is a permanent window
+          setting, so it can't be enabled on the same window - instead a new window needs to be created.
+          This means that dynamically changing a component's alpha level at runtime might force the
+          window to be recreated, which is not ideal.
+        - We can't just disable the redirection bitmap by default, because it's needed to display
+          child windows, notably plugin editors
+        - The mouse gets captured inside the entire window bounds, rather than just the non-transparent parts
+
+        To avoid these problems, we only use the swapchain to present opaque windows.
+        For transparent windows, we use a different technique - see below.
+    */
+    class WrappedD2DHwndContext : public WrappedD2DHwndContextBase
+    {
+    public:
+        explicit WrappedD2DHwndContext (HWND hwnd) : ctx (hwnd) {}
+
+        void addDeferredRepaint (Rectangle<int> area) override
+        {
+            ctx.addDeferredRepaint (area);
+        }
+
+        Image createSnapshot() const override
+        {
+            return ctx.createSnapshot();
+        }
+
+        void setResizing (bool x) override
+        {
+            ctx.setResizing (x);
+        }
+
+        bool getResizing() const override
+        {
+            return ctx.getResizing();
+        }
+
+        void setSize (int w, int h) override
+        {
+            ctx.setSize (w, h);
+        }
+
+        void handleShowWindow() override
+        {
+            ctx.handleShowWindow();
+        }
+
+        LowLevelGraphicsContext* startFrame (float scale) override
+        {
+            if (ctx.startFrame (scale))
+                return &ctx;
+
+            return nullptr;
+        }
+
+        void endFrame() override
+        {
+            ctx.endFrame();
+        }
+
+        bool supportsTransparency() const override
+        {
+            return false;
+        }
+
+        void updateAlpha() override
+        {
+            // This doesn't support transparency, so updating the alpha won't do anything
+            jassertfalse;
+        }
+
+        Direct2DMetrics::Ptr getMetrics() const override
+        {
+            return ctx.metrics;
+        }
+
+    private:
+        Direct2DHwndContext ctx;
+    };
+
+    class DxgiBitmapRenderer
+    {
+    public:
+        LowLevelGraphicsContext* startFrame (HWND hwnd, float scale, const RectangleList<int>& dirty)
+        {
+            RECT r;
+            GetClientRect (hwnd, &r);
+
+            const auto w = r.right - r.left;
+            const auto h = r.bottom - r.top;
+            const auto size = D2D1::SizeU ((UINT32) w, (UINT32) h);
+
+            const auto lastAdapter = std::exchange (adapter, directX->adapters.getAdapterForHwnd (hwnd));
+
+            const auto needsNewDC = lastAdapter != adapter || deviceContext == nullptr;
+
+            if (needsNewDC)
+            {
+                deviceContext = Direct2DDeviceContext::create (adapter);
+                bitmap = nullptr;
+                context = nullptr;
+            }
+
+            if (deviceContext == nullptr)
+                return nullptr;
+
+            const auto needsNewBitmap = bitmap == nullptr || ! equal (bitmap->GetPixelSize(), size);
+
+            if (needsNewBitmap)
+            {
+                bitmap = Direct2DBitmap::createBitmap (deviceContext,
+                                                       Image::ARGB,
+                                                       size,
+                                                       D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE);
+                context = nullptr;
+            }
+
+            if (bitmap == nullptr)
+                return nullptr;
+
+            const auto paintAreas = needsNewBitmap ? Rectangle { (int) w, (int) h } : dirty;
+
+            if (paintAreas.isEmpty())
+                return nullptr;
+
+            if (context == nullptr)
+                context = std::make_unique<Direct2DImageContext> (deviceContext, bitmap, paintAreas);
+
+            if (! context->startFrame (scale))
+                context = nullptr;
+
+            if (context == nullptr)
+                return nullptr;
+
+            context->setFill (Colours::transparentBlack);
+            context->fillRect ({ (int) size.width, (int) size.height }, true);
+
+            return context.get();
+        }
+
+        void endFrame()
+        {
+            if (context != nullptr)
+                context->endFrame();
+        }
+
+        Image getImage() const
+        {
+            return Image { Direct2DPixelData::fromDirect2DBitmap (adapter, deviceContext, bitmap) };
+        }
+
+        ComSmartPtr<ID2D1Bitmap1> getBitmap() const
+        {
+            return bitmap;
+        }
+
+        Direct2DMetrics::Ptr getMetrics() const
+        {
+            if (context != nullptr)
+                return context->metrics;
+
+            return {};
+        }
+
+    private:
+        static constexpr bool equal (D2D1_SIZE_U a, D2D1_SIZE_U b)
+        {
+            const auto tie = [] (auto& x) { return std::tie (x.width, x.height); };
+            return tie (a) == tie (b);
+        }
+
+        SharedResourcePointer<DirectX> directX;
+        DxgiAdapter::Ptr adapter;
+        ComSmartPtr<ID2D1DeviceContext1> deviceContext;
+        ComSmartPtr<ID2D1Bitmap1> bitmap;
+        std::unique_ptr<Direct2DImageContext> context;
+    };
+
+    /*  This wrapper facilitates drawing Direct2D content into a transparent/layered window.
+
+        As an alternative to using DirectComposition, we instead use the older technique of using
+        a layered window, and calling UpdateLayeredWindow to set per-pixel alpha on the window.
+        This will be slower than going through the swap chain, but means that we can still set
+        the alpha level dynamically at runtime, support child windows as before, and support
+        per-pixel mouse hit-testing.
+
+        UpdateLayeredWindow is an older API that expects a HDC input containing the image that is
+        blitted to the screen. To get an HDC out of Direct2D, we cast a D2D bitmap to IDXGISurface1,
+        which exposes a suitable DC. This only works if the target bitmap is constructed with the
+        D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE option.
+    */
+    class WrappedD2DHwndContextTransparent : public WrappedD2DHwndContextBase
+    {
+    public:
+        explicit WrappedD2DHwndContextTransparent (HWNDComponentPeer& p) : peer (p) {}
+
+        void addDeferredRepaint (Rectangle<int> area) override
+        {
+            deferredRepaints.add (area);
+        }
+
+        Image createSnapshot() const override
+        {
+            DxgiBitmapRenderer renderer;
+
+            if (auto* ctx = renderer.startFrame (peer.getHWND(), (float) peer.getPlatformScaleFactor(), {}))
+            {
+                peer.handlePaint (*ctx);
+                renderer.endFrame();
+            }
+
+            return renderer.getImage();
+        }
+
+        void setResizing (bool x) override { resizing = x; }
+        bool getResizing() const override { return resizing; }
+
+        void setSize (int, int) override {}
+        void handleShowWindow() override {}
+
+        LowLevelGraphicsContext* startFrame (float scale) override
+        {
+            auto* result = bitmapRenderer.startFrame (peer.getHWND(), scale, deferredRepaints);
+
+            if (result != nullptr)
+                deferredRepaints.clear();
+
+            return result;
+        }
+
+        void endFrame() override
+        {
+            bitmapRenderer.endFrame();
+            updateLayeredWindow();
+        }
+
+        bool supportsTransparency() const override
+        {
+            return true;
+        }
+
+        void updateAlpha() override
+        {
+            updateLayeredWindow();
+        }
+
+        Direct2DMetrics::Ptr getMetrics() const override
+        {
+            return bitmapRenderer.getMetrics();
+        }
+
+    private:
+        void updateLayeredWindow()
+        {
+            const auto bitmap = bitmapRenderer.getBitmap();
+
+            if (bitmap == nullptr)
+                return;
+
+            ComSmartPtr<IDXGISurface> surface;
+            if (const auto hr = bitmap->GetSurface (surface.resetAndGetPointerAddress());
+                FAILED (hr) || surface == nullptr)
+            {
+                jassertfalse;
+                return;
+            }
+
+            ComSmartPtr<IDXGISurface1> surface1;
+            surface.QueryInterface (surface1);
+
+            if (surface1 == nullptr)
+            {
+                jassertfalse;
+                return;
+            }
+
+            HDC hdc{};
+            if (const auto hr = surface1->GetDC (false, &hdc); FAILED (hr))
+            {
+                jassertfalse;
+                return;
+            }
+
+            const ScopeGuard releaseDC { [&]
+                                         {
+                                             RECT emptyRect { 0, 0, 0, 0 };
+                                             const auto hr = surface1->ReleaseDC (&emptyRect);
+                                             jassertquiet (SUCCEEDED (hr));
+                                         } };
+
+            if (peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::perPixel)
+            {
+                WindowsBitmapImage::updateLayeredWindow (hdc, peer.getHWND(), {}, peer.getComponent().getAlpha());
+            }
+            else
+            {
+                const ScopedDeviceContext scope { peer.getHWND() };
+                const auto size = bitmap->GetPixelSize();
+                BitBlt (scope.dc, 0, 0, (int) size.width, (int) size.height, hdc, 0, 0, SRCCOPY);
+
+                if (peer.getTransparencyKind() == HWNDComponentPeer::TransparencyKind::constant)
+                    SetLayeredWindowAttributes (peer.getHWND(), {}, (BYTE) (255.0f * peer.getComponent().getAlpha()), LWA_ALPHA);
+            }
+        }
+
+        HWNDComponentPeer& peer;
+
+        DxgiBitmapRenderer bitmapRenderer;
+        RectangleList<int> deferredRepaints;
+        bool resizing = false;
+    };
+
     void handleDirect2DPaint()
     {
        #if JUCE_DIRECT2D_METRICS
@@ -5089,26 +5487,39 @@ private:
         //
         // Direct2DLowLevelGraphicsContext::endFrame calls ID2D1DeviceContext::EndDraw to finish painting
         // and then tells the swap chain to present the next swap chain back buffer.
-        if (! direct2DContext->startFrame ((float) peer.getPlatformScaleFactor()))
-            return;
-
-        peer.handlePaint (*direct2DContext);
-        direct2DContext->endFrame();
+        if (auto* ctx = direct2DContext->startFrame ((float) peer.getPlatformScaleFactor()))
+        {
+            peer.handlePaint (*ctx);
+            direct2DContext->endFrame();
+        }
 
        #if JUCE_DIRECT2D_METRICS
         if (lastPaintStartTicks > 0)
         {
-            direct2DContext->metrics->addValueTicks (Direct2DMetrics::messageThreadPaintDuration,
-                                                     Time::getHighResolutionTicks() - paintStartTicks);
-            direct2DContext->metrics->addValueTicks (Direct2DMetrics::frameInterval, paintStartTicks - lastPaintStartTicks);
+            if (auto metrics = direct2DContext->getMetrics())
+            {
+                metrics->addValueTicks (Direct2DMetrics::messageThreadPaintDuration,
+                                        Time::getHighResolutionTicks() - paintStartTicks);
+                metrics->addValueTicks (Direct2DMetrics::frameInterval,
+                                        paintStartTicks - lastPaintStartTicks);
+            }
         }
         lastPaintStartTicks = paintStartTicks;
        #endif
     }
 
+    static std::unique_ptr<WrappedD2DHwndContextBase> getContextForPeer (HWNDComponentPeer& peer)
+    {
+        if (peer.getTransparencyKind() != HWNDComponentPeer::TransparencyKind::opaque)
+            return std::make_unique<WrappedD2DHwndContextTransparent> (peer);
+
+        return std::make_unique<WrappedD2DHwndContext> (peer.getHWND());
+    }
+
     HWNDComponentPeer& peer;
 
-    std::unique_ptr<Direct2DHwndContext> direct2DContext;
+    std::unique_ptr<WrappedD2DHwndContextBase> direct2DContext = getContextForPeer (peer);
+    UpdateRegion updateRegion;
 
    #if JUCE_ETW_TRACELOGGING
     struct ETWEventProvider
@@ -5150,12 +5561,17 @@ inline constexpr ContextDescriptor contextDescriptorList[]
 };
 
 // To add a new rendering backend, implement RenderContext for that backend, and then append the backend to this typelist
-inline constexpr auto& contextDescriptors = contextDescriptorList<GDIContext, D2DContext>;
+inline constexpr auto& contextDescriptors = contextDescriptorList<GDIRenderContext, D2DRenderContext>;
 
 void HWNDComponentPeer::setCurrentRenderingEngine (int e)
 {
     if (isPositiveAndBelow (e, std::size (contextDescriptors)) && (renderContext == nullptr || getCurrentRenderingEngine() != e))
+    {
+        // Reset the old context before creating the new context, because some context resources
+        // can only be created once per window.
+        renderContext.reset();
         renderContext = contextDescriptors[e].construct (*this);
+    }
 }
 
 StringArray HWNDComponentPeer::getAvailableRenderingEngines()
