@@ -94,14 +94,17 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-W#warnings",
 #undef DEVELOPMENT
 #define DEVELOPMENT 0  // This avoids a Clang warning in Steinberg code about unused values
 
-/*  These files come with the Steinberg VST3 SDK - to get them, you'll need to
-    visit the Steinberg website and agree to whatever is currently required to
-    get them.
+// As of at least 3.7.12 there is a bug in fplatform.h that leads to SMTG_CPP20
+// having the wrong value when the /Zc:__cplusplus is not enabled. This work
+// around prevents needing to provide that flag
 
-    Then, you'll need to make sure your include path contains your "VST3 SDK"
-    directory (or whatever you've named it on your machine). The Projucer has
-    a special box for setting this path.
-*/
+#include <juce_audio_processors/format_types/VST3_SDK/pluginterfaces/base/fplatform.h>
+
+#ifdef SMTG_CPP20
+ #undef SMTG_CPP20
+ #define SMTG_CPP20 JUCE_CXX20_IS_AVAILABLE
+#endif
+
 #if JUCE_VST3HEADERS_INCLUDE_HEADERS_ONLY
  #include <base/source/fstring.h>
  #include <pluginterfaces/base/conststringtable.h>
