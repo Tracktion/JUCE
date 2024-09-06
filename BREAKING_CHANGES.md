@@ -89,6 +89,65 @@ of overriding invokeMethod(), which is more compatible with QuickJS.
 
 ## Change
 
+The default JSON encoding has changed from ASCII escape sequences to UTF-8.
+
+**Possible Issues**
+
+JSON text exchanged with a non-standard compliant parser expecting ASCII
+encoding, may fail to parse UTF-8 encoded JSON files. Reliance on the raw JSON
+encoded string literal, for example for file comparison, Base64 encoding, or any
+encryption, may result in false negatives for JSON data containing the same data
+between versions of JUCE.
+
+Note: JSON files that only ever encoded ASCII text will NOT be effected.
+
+**Workaround**
+
+Use the `JSON::writeToStream()` or `JSON::toString()` functions that take a
+`FormatOptions` parameter and call `withEncoding (JSON::Encoding::ascii)` on the
+`FormatOptions` object.
+
+**Rationale**
+
+RFC 8259 states
+
+> JSON text exchanged between systems that are not part of a closed ecosystem
+MUST be encoded using UTF-8 [RFC3629].
+>
+> Previous specifications of JSON have not required the use of UTF-8 when
+transmitting JSON text.  However, the vast majority of JSON-based software
+implementations have chosen to use the UTF-8 encoding, to the extent that it is
+the only encoding that achieves interoperability.
+
+For this reason UTF-8 encoding has better interoperability than ASCII escape
+sequences.
+
+
+## Change
+
+The ASCII and Unicode BEL character (U+0007) escape sequence has changed in the
+JSON encoder from "\a" to "\u0007".
+
+**Possible Issues**
+
+Reliance on the raw JSON encoded string literal, for example for file comparison,
+base-64 encoding, or any encryption, may result in false negatives for JSON data
+containing a BEL character between versions of JUCE.
+
+**Workaround**
+
+Use string replace, for example call `replace ("\\u007", "\\a")` on the
+resulting JSON string to match older versions of JUCE.
+
+**Rationale**
+
+The JSON specification does not state that the BEL character can be escaped
+using "\a". Therefore other JSON parsers incorrectly read this character when
+they encounter it.
+
+
+## Change
+
 The LowLevelGraphicsPostscriptRenderer has been removed.
 
 **Possible Issues**
@@ -104,7 +163,7 @@ into your own project/module and use them that way.
 **Rationale**
 
 We are not aware of any projects using this functionality. This renderer was
-not as fully-featured as any of the other renders, so it's likely that users
+not as fully-featured as any of the other renderers, so it's likely that users
 would have filed issue reports if they were using this feature.
 
 
@@ -545,14 +604,14 @@ implementation wrapping the QuickJS engine.
 **Possible Issues**
 
 Code that previously successfully evaluated using JavascriptEngine::evaluate()
-or JavascriptEngine::execute(), could now fail due to the rules applied by the 
-new, much more standards compliant engine. One example is object literals 
+or JavascriptEngine::execute(), could now fail due to the rules applied by the
+new, much more standards compliant engine. One example is object literals
 e.g. { a: 'foo', b: 42, c: {} }. When evaluated this way the new engine will
 assume that this is a code block and fail.
 
 **Workaround**
 
-When calling JavascriptEngine::evaluate() or JavascriptEngine::execute() the 
+When calling JavascriptEngine::evaluate() or JavascriptEngine::execute() the
 code may have to be updated to ensure that it's correct according to the
 Javascript language specification and in the context of that evaluation. Object
 literals standing on their own for example should be wrapped in parentheses
