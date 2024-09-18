@@ -69,7 +69,6 @@ void* getUser32Function (const char*);
 
 #if JUCE_DEBUG
  int numActiveScopedDpiAwarenessDisablers = 0;
- static bool isInScopedDPIAwarenessDisabler() { return numActiveScopedDpiAwarenessDisablers > 0; }
  extern HWND juce_messageWindowHandle;
 #endif
 
@@ -1721,6 +1720,11 @@ public:
         return wp.showCmd == SW_SHOWMINIMIZED;
     }
 
+    bool isShowing() const override
+    {
+        return IsWindowVisible (hwnd) && ! isMinimised();
+    }
+
     void setFullScreen (bool shouldBeFullScreen) override
     {
         const ScopedValueSetter<bool> scope (shouldIgnoreModalDismiss, true);
@@ -2465,7 +2469,7 @@ private:
         // You normally want these to match otherwise timer events and async messages will happen
         // in a different context to normal HWND messages which can cause issues with UI scaling.
         jassert (isPerMonitorDPIAwareWindow (hwnd) == isPerMonitorDPIAwareWindow (juce_messageWindowHandle)
-                   || isInScopedDPIAwarenessDisabler());
+                   || numActiveScopedDpiAwarenessDisablers > 0);
        #endif
 
         if (hwnd != nullptr)
@@ -5314,7 +5318,7 @@ private:
 
         Image getImage() const
         {
-            return Image { Direct2DPixelData::fromDirect2DBitmap (adapter, deviceContext, bitmap) };
+            return Image { new Direct2DPixelData { deviceContext, bitmap } };
         }
 
         ComSmartPtr<ID2D1Bitmap1> getBitmap() const
