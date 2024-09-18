@@ -141,6 +141,11 @@
 
 #include <juce_graphics/fonts/harfbuzz/hb-ot.h>
 
+extern "C"
+{
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi.h>
+} // extern "C"
+
 #if JUCE_UNIT_TESTS
  #include "fonts/juce_TypefaceTestData.cpp"
 #endif
@@ -153,7 +158,6 @@
 #include "unicode/juce_UnicodeUtils.cpp"
 #include "unicode/juce_UnicodeLine.cpp"
 #include "unicode/juce_UnicodeScript.cpp"
-#include "unicode/juce_UnicodeBrackets.cpp"
 #include "unicode/juce_UnicodeBidi.cpp"
 #include "unicode/juce_Unicode.cpp"
 #include "colour/juce_Colour.cpp"
