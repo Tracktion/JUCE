@@ -1793,11 +1793,7 @@ public:
 
         const auto screenPos = convertLogicalScreenPointToPhysical (localPos + getScreenPosition(), hwnd);
 
-        if (trueIfInAChildWindow)
-            return getClientRectInScreen().contains (screenPos);
-
         auto w = WindowFromPoint (D2DUtilities::toPOINT (screenPos));
-
         return w == hwnd || (trueIfInAChildWindow && (IsChild (hwnd, w) != 0));
     }
 
@@ -3397,8 +3393,7 @@ private:
             r = D2DUtilities::toRECT (modifiedPhysicalBounds);
         }
 
-        if (renderContext != nullptr)
-            renderContext->setSize (r.right - r.left, r.bottom - r.top);
+        updateBorderSize();
 
         return TRUE;
     }
