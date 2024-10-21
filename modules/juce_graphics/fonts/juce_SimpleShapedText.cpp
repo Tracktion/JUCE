@@ -497,12 +497,14 @@ static std::vector<ShapedGlyph> lowLevelShape (const String& string,
     jassert (unknownGlyph == infos.end());
 
     [[maybe_unused]] const auto trackingAmount = ! trackingIsDefault
-                                               ? font.getHeight() * tracking
+                                               ? font.getHeight() * font.getHorizontalScale() * tracking
                                                : 0;
 
     std::vector<size_t> clusterLookup;
     std::vector<size_t> characterLookup;
     std::vector<ShapedGlyph> glyphs;
+
+    std::optional<uint32_t> lastCluster;
 
     for (size_t i = 0; i < infos.size(); ++i)
     {
@@ -511,12 +513,35 @@ static std::vector<ShapedGlyph> lowLevelShape (const String& string,
         const auto glyphId = infos[j].codepoint;
         const auto xAdvance = positions[j].x_advance;
 
+        // For certain OS, Font and glyph ID combinations harfbuzz will not find extents data and
+        // hb_font_get_glyph_extents will return false. In such cases Typeface::getGlyphBounds
+        // will return an empty rectangle. Here we need to distinguish this situation from the one
+        // where extents information is available and is an empty rectangle, which indicates a
+        // whitespace.
+        const auto extentsDataAvailable = std::invoke ([&]
+        {
+            hb_glyph_extents_t extents{};
+            return hb_font_get_glyph_extents (font.getTypefacePtr()->getNativeDetails().getFont(),
+                                              (hb_codepoint_t) glyphId,
+                                              &extents);
+        });
+
+        const auto whitespace = extentsDataAvailable
+                                && font.getTypefacePtr()->getGlyphBounds (font.getMetricsKind(), (int) glyphId).isEmpty()
+                                && xAdvance > 0;
+
+        // Tracking is only applied at the beginning of a new cluster to avoid inserting it before
+        // diacritic marks.
+        const auto appliedTracking = std::exchange (lastCluster, infos[j].cluster) != infos[j].cluster
+                                   ? trackingAmount
+                                   : 0;
+
         glyphs.push_back ({
             glyphId,
             (int64) infos[j].cluster + range.getStart(),
             (infos[j].mask & HB_GLYPH_FLAG_UNSAFE_TO_BREAK) != 0,
-            font.getTypefacePtr()->getGlyphBounds (font.getMetricsKind(), (int) glyphId).isEmpty() && xAdvance > 0,
-            Point<float> { HbScale::hbToJuce (xAdvance) + trackingAmount, -HbScale::hbToJuce (positions[j].y_advance) },
+            whitespace,
+            Point<float> { HbScale::hbToJuce (xAdvance) + appliedTracking, -HbScale::hbToJuce (positions[j].y_advance) },
             Point<float> { HbScale::hbToJuce (positions[j].x_offset), -HbScale::hbToJuce (positions[j].y_offset) },
         });
     }
@@ -1035,7 +1060,7 @@ void SimpleShapedText::shape (const String& data,
         ConsumableGlyphs glyphsToConsume { data, range, shapingParams };
 
         const auto appendingToFirstLine = [&] { return lineNumbers.isEmpty(); };
-        const auto appendingToLastLine  = [&] { return (int64) lineNumbers.size() == options.getMaxNumLines() - 1; };
+        const auto appendingToBeforeLastLine  = [&] { return (int64) lineNumbers.size() < options.getMaxNumLines() - 1; };
 
         while (! glyphsToConsume.isEmpty())
         {
@@ -1060,7 +1085,7 @@ void SimpleShapedText::shape (const String& data,
             static constexpr auto floatMax = std::numeric_limits<float>::max();
 
             for (auto breakBefore = softBreakIterator.next();
-                 breakBefore.has_value() && (appendingToFirstLine() || ! appendingToLastLine());
+                 breakBefore.has_value() && (appendingToFirstLine() || appendingToBeforeLastLine());
                  breakBefore = softBreakIterator.next())
             {
                 if (auto safeAdvance = glyphsToConsume.getAdvanceXUpToBreakPointIfSafe (*breakBefore,
@@ -1218,9 +1243,11 @@ void SimpleShapedText::shape (const String& data,
 
                     while (! glyphsToAdd.glyphs.empty())
                     {
+                        const auto appendingToLastLine = ! appendingToBeforeLastLine();
+
                         glyphsToAdd = addGlyphsToLine (glyphsToAdd,
-                                                       (appendingToLastLine() || ! options.getAllowBreakingInsideWord()) ? CanAddGlyphsBeyondLineLimits::yes
-                                                                                                                         : CanAddGlyphsBeyondLineLimits::no);
+                                                       (appendingToLastLine || ! options.getAllowBreakingInsideWord()) ? CanAddGlyphsBeyondLineLimits::yes
+                                                                                                                       : CanAddGlyphsBeyondLineLimits::no);
 
                         if (! glyphsToAdd.glyphs.empty())
                             commitLine (bidiParagraph);
