@@ -95,6 +95,9 @@ public:
 
     ~TimerThread() override
     {
+        // If this is hit, a timer has outlived the platform event system.
+        jassert (MessageManager::getInstanceWithoutCreating() != nullptr);
+
         stopThreadAsync();
         ShutdownDetector::removeListener (this);
         stopThread (-1);
@@ -426,7 +429,7 @@ struct LambdaInvoker final : private Timer,
 
     std::function<void()> function;
 
-    JUCE_DECLARE_NON_COPYABLE (LambdaInvoker)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LambdaInvoker)
 };
 
 void JUCE_CALLTYPE Timer::callAfterDelay (int milliseconds, std::function<void()> f)
