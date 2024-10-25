@@ -80,10 +80,13 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Windows")
             OR (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64"
                 AND NOT (JUCE_TARGET_ARCHITECTURE STREQUAL "i386"
                          OR JUCE_TARGET_ARCHITECTURE STREQUAL "x86_64")))
-            set(JUCE_WINDOWS_HELPERS_CAN_RUN FALSE)
+            set(windows_helpers_can_run FALSE)
         else()
-            set(JUCE_WINDOWS_HELPERS_CAN_RUN TRUE)
+            set(windows_helpers_can_run TRUE)
         endif()
+
+        set(JUCE_WINDOWS_HELPERS_CAN_RUN ${windows_helpers_can_run}
+            CACHE INTERNAL "Signals whether plugin related helper utilities can run on the build machine")
     endif()
 endif()
 
@@ -376,12 +379,15 @@ endfunction()
 # ==================================================================================================
 
 function(_juce_create_pkgconfig_target name)
+    set(options NOLINK)
+    cmake_parse_arguments(JUCE_ARG "${options}" "" "" ${ARGN})
+
     if(TARGET juce::pkgconfig_${name})
         return()
     endif()
 
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(${name} ${ARGN})
+    pkg_check_modules(${name} ${JUCE_ARG_UNPARSED_ARGUMENTS})
 
     add_library(pkgconfig_${name} INTERFACE)
     add_library(juce::pkgconfig_${name} ALIAS pkgconfig_${name})
@@ -389,9 +395,12 @@ function(_juce_create_pkgconfig_target name)
 
     set(pairs
         "INCLUDE_DIRECTORIES\;INCLUDE_DIRS"
-        "LINK_LIBRARIES\;LINK_LIBRARIES"
         "LINK_OPTIONS\;LDFLAGS_OTHER"
         "COMPILE_OPTIONS\;CFLAGS_OTHER")
+
+    if(NOT JUCE_ARG_NOLINK)
+        list(APPEND pairs "LINK_LIBRARIES\;LINK_LIBRARIES")
+    endif()
 
     foreach(pair IN LISTS pairs)
         list(GET pair 0 key)

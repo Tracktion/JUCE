@@ -1,5 +1,51 @@
 # JUCE breaking changes
 
+# develop
+
+## Change
+
+The VBlankAttachment class' inheritance from the ComponentPeer::VBlankListener
+and ComponentListener classes has been made private.
+
+**Possible Issues**
+
+External code that calls VBlankAttachment::onVBlank or
+VBlankAttachment::componentParentHierarchyChanged will fail to compile.
+
+**Workaround**
+
+There is no workaround.
+
+**Rationale**
+
+Making the inheritance public originally was an oversight. The overriden
+functions are meant to be called only by the ComponentPeer and Component objects
+that the VBlankAttachment instance registers itself with. External code calling
+these functions undermines the correct behaviour of the VBlankAttachment class.
+
+
+## Change
+
+The signature of VBlankListener::onVBlank() was changed to
+VBlankListener::onVBlank (double), with the addition of a timestamp parameter
+that corresponds to the time at which the next frame will be displayed.
+
+**Possible Issues**
+
+Code that overrides VBlankListener::onVBlank() will fail to compile.
+
+**Workaround**
+
+Add a double parameter to the function overriding VBlankListener::onVBlank().
+The behaviour will be unchanged if this new parameter is then ignored.
+
+**Rationale**
+
+A timestamp parameter has been missing from the VBlank callback since its
+addition. The new parameter allows all VBlankListeners to synchronise the
+content of their draw calls to the same frame timestamp.
+
+
 # Version 8.0.2
 
 ## Change
