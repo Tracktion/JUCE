@@ -42,16 +42,16 @@
 
  BEGIN_JUCE_MODULE_DECLARATION
 
-  ID:                 juce_animation
+  ID:                 juce_javascript
   vendor:             juce
   version:            8.0.3
-  name:               JUCE Animation classes
-  description:        Classes for defining and handling animations.
+  name:               JUCE Javascript interpreter
+  description:        Javascript interpreter.
   website:            http://www.juce.com/juce
   license:            AGPLv3/Commercial
   minimumCppStandard: 17
 
-  dependencies:       juce_gui_basics
+  dependencies:       juce_core
 
  END_JUCE_MODULE_DECLARATION
 
@@ -59,18 +59,10 @@
 
 
 #pragma once
-#define JUCE_ANIMATION_H_INCLUDED
+#define JUCE_JAVASCRIPT_H_INCLUDED
 
-#include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_core/juce_core.h>
 
-//==============================================================================
-#include "detail/juce_ArrayAndTupleOps.h"
-
-//==============================================================================
-#include "animation/juce_Animator.h"
-#include "animation/juce_AnimatorSetBuilder.h"
-#include "animation/juce_AnimatorUpdater.h"
-#include "animation/juce_Easings.h"
-#include "animation/juce_StaticAnimationLimits.h"
-#include "animation/juce_ValueAnimatorBuilder.h"
-#include "animation/juce_VBlankAnimatorUpdater.h"
+#include "javascript/juce_JSObject.h"
+#include "javascript/juce_JSCursor.h"
+#include "javascript/juce_JavascriptEngine.h"

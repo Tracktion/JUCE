@@ -32,45 +32,32 @@
   ==============================================================================
 */
 
+#ifdef JUCE_JAVASCRIPT_H_INCLUDED
+ /* When you add this cpp file to your project, you mustn't include it in a file where you've
+    already included any other headers - just put it inside a file on its own, possibly with your config
+    flags preceding it, but don't include anything else. That also includes avoiding any automatic prefix
+    header files that the compiler may be using.
+ */
+ #error "Incorrect use of JUCE cpp file"
+#endif
 
-/*******************************************************************************
- The block below describes the properties of this module, and is read by
- the Projucer to automatically generate project code that uses it.
- For details about the syntax and how to create or use a module, see the
- JUCE Module Format.md file.
+#include "juce_javascript.h"
 
+#ifdef CONFIG_BIGNUM
+ JUCE_COMPILER_WARNING ("The QuickJS version embedded inside of JUCE does not support the CONFIG_BIGNUM setting.")
+ #undef CONFIG_BIGNUM
+#endif
 
- BEGIN_JUCE_MODULE_DECLARATION
+#define choc juce::detail::choc
+#include <juce_javascript/choc/javascript/choc_javascript_QuickJS.h>
+#undef choc
 
-  ID:                 juce_animation
-  vendor:             juce
-  version:            8.0.3
-  name:               JUCE Animation classes
-  description:        Classes for defining and handling animations.
-  website:            http://www.juce.com/juce
-  license:            AGPLv3/Commercial
-  minimumCppStandard: 17
+#include "detail/juce_QuickJSHelpers.h"
 
-  dependencies:       juce_gui_basics
+#include "javascript/juce_JSObject.cpp"
+#include "javascript/juce_JSCursor.cpp"
+#include "javascript/juce_JavascriptEngine.cpp"
 
- END_JUCE_MODULE_DECLARATION
-
-*******************************************************************************/
-
-
-#pragma once
-#define JUCE_ANIMATION_H_INCLUDED
-
-#include <juce_gui_basics/juce_gui_basics.h>
-
-//==============================================================================
-#include "detail/juce_ArrayAndTupleOps.h"
-
-//==============================================================================
-#include "animation/juce_Animator.h"
-#include "animation/juce_AnimatorSetBuilder.h"
-#include "animation/juce_AnimatorUpdater.h"
-#include "animation/juce_Easings.h"
-#include "animation/juce_StaticAnimationLimits.h"
-#include "animation/juce_ValueAnimatorBuilder.h"
-#include "animation/juce_VBlankAnimatorUpdater.h"
+#if JUCE_UNIT_TESTS
+ #include "javascript/juce_Javascript_test.cpp"
+#endif
