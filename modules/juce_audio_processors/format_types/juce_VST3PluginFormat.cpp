@@ -2425,10 +2425,7 @@ public:
         Steinberg::int32 indexOut = notInVector;
 
         if (auto* queue = addParameterData (id, indexOut))
-        {
-            Steinberg::int32 index{};
-            queue->addPoint (offset, value, index);
-        }
+            queue->append ({ offset, value });
     }
 
     void clear()
