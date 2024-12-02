@@ -2595,6 +2595,11 @@ public:
             return cachedInfo;
         }
 
+        Steinberg::int32 getVstParamIndex() const
+        {
+            return vstParamIndex;
+        }
+
     private:
         Vst::ParameterInfo fetchParameterInfo() const
         {
@@ -3800,12 +3805,21 @@ private:
 
         if (acceptsMidi())
         {
-            const auto midiMessageCallback = [&] (auto controlID, auto paramValue, auto time)
+            const auto midiMessageCallback = [&] (auto controlID, float paramValue, auto time)
             {
                 Steinberg::int32 queueIndex{};
 
                 if (auto* queue = inputParameterChanges->addParameterData (controlID, queueIndex))
-                    queue->append ({ (Steinberg::int32) time, (float) paramValue });
+                    queue->append ({ (Steinberg::int32) time, paramValue });
+
+                if (auto* param = getParameterForID (controlID))
+                {
+                    // Send the parameter value to the editor
+                    parameterDispatcher.push (param->getVstParamIndex(), paramValue);
+
+                    // Update the host's view of the parameter value
+                    param->setValueWithoutUpdatingProcessor (paramValue);
+                }
             };
 
             MidiEventList::hostToPluginEventList (*midiInputs,
