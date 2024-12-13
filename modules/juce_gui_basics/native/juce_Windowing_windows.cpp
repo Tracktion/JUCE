@@ -619,6 +619,9 @@ ScopedThreadDPIAwarenessSetter::ScopedThreadDPIAwarenessSetter (void* nativeWind
 
 ScopedThreadDPIAwarenessSetter::~ScopedThreadDPIAwarenessSetter() = default;
 
+ScopedThreadDPIAwarenessSetter::ScopedThreadDPIAwarenessSetter (ScopedThreadDPIAwarenessSetter&&) noexcept = default;
+ScopedThreadDPIAwarenessSetter& ScopedThreadDPIAwarenessSetter::operator= (ScopedThreadDPIAwarenessSetter&&) noexcept = default;
+
 static auto& getScopedDPIAwarenessDisablerFunctions()
 {
     struct Functions
@@ -4974,7 +4977,7 @@ private:
                     peer.handlePaint (*context);
                 }
 
-                auto* image = static_cast<WindowsBitmapImage*> (offscreenImage.getPixelData());
+                auto* image = static_cast<WindowsBitmapImage*> (offscreenImage.getPixelData().get());
 
                 if (perPixelTransparent)
                 {
@@ -5274,7 +5277,7 @@ private:
 
         Image getImage() const
         {
-            return Image { new Direct2DPixelData { deviceContext, bitmap } };
+            return Image { new Direct2DPixelData { adapter->direct2DDevice, bitmap } };
         }
 
         ComSmartPtr<ID2D1Bitmap1> getBitmap() const
