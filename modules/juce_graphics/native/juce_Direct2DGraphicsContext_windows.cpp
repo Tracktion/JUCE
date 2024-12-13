@@ -340,8 +340,8 @@ public:
 
             const auto d2d1Bitmap = [&]
             {
-                if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (fillType.image.getPixelData()))
-                    if (const auto page = direct2DPixelData->getFirstPageForContext (context))
+                if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (fillType.image.getPixelData().get()))
+                    if (const auto page = direct2DPixelData->getFirstPageForDevice (D2DUtilities::getDeviceForContext (context)))
                         if (page->GetPixelFormat().format == DXGI_FORMAT_B8G8R8A8_UNORM)
                             return page;
 
@@ -1070,21 +1070,24 @@ void Direct2DGraphicsContext::resetPendingClipList()
 
 void Direct2DGraphicsContext::applyPendingClipList()
 {
+    if (! pendingClipList.isClipApplied())
+        return;
+
     auto& transform = currentState->currentTransform;
-    bool const axisAligned = currentState->isCurrentTransformAxisAligned();
+    const auto axisAligned = currentState->isCurrentTransformAxisAligned();
     const auto list = pendingClipList.getList();
 
     // Clip if the pending clip list is not empty and smaller than the frame size
     if (! list.containsRectangle (getPimpl()->getFrameSize().toFloat()) && ! list.isEmpty())
     {
-        if (list.getNumRectangles() == 1 && (transform.isOnlyTranslated || axisAligned))
+        if (list.getNumRectangles() == 1 && axisAligned)
         {
             auto r = list.getRectangle (0);
             currentState->pushAliasedAxisAlignedClipLayer (r);
         }
         else
         {
-            auto clipTransform = transform.isOnlyTranslated || axisAligned ? AffineTransform{} : transform.getTransform();
+            auto clipTransform = axisAligned ? AffineTransform{} : transform.getTransform();
             if (auto clipGeometry = D2DHelpers::rectListToPathGeometry (getPimpl()->getDirect2DFactory(),
                                                                         list,
                                                                         clipTransform,
@@ -1170,8 +1173,8 @@ void Direct2DGraphicsContext::clipToImageAlpha (const Image& sourceImage, const 
         // Is this a Direct2D image already?
         ComSmartPtr<ID2D1Bitmap> d2d1Bitmap;
 
-        if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (sourceImage.getPixelData()))
-            d2d1Bitmap = direct2DPixelData->getFirstPageForContext (deviceContext);
+        if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (sourceImage.getPixelData().get()))
+            d2d1Bitmap = direct2DPixelData->getFirstPageForDevice (D2DUtilities::getDeviceForContext (deviceContext));
 
         if (! d2d1Bitmap)
         {
@@ -1454,7 +1457,7 @@ void Direct2DGraphicsContext::drawImage (const Image& imageIn, const AffineTrans
 
         const auto imageTransform = currentState->currentTransform.getTransformWith (transform);
 
-        if (auto* subsectionPixelData = dynamic_cast<SubsectionPixelData*> (image.getPixelData()))
+        if (auto* subsectionPixelData = dynamic_cast<SubsectionPixelData*> (image.getPixelData().get()))
         {
             if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (subsectionPixelData->getSourcePixelData().get()))
             {
@@ -1462,7 +1465,7 @@ void Direct2DGraphicsContext::drawImage (const Image& imageIn, const AffineTrans
                 imageClipArea = subsectionPixelData->getSubsection();
             }
         }
-        else if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (image.getPixelData()))
+        else if (auto direct2DPixelData = dynamic_cast<Direct2DPixelData*> (image.getPixelData().get()))
         {
             nativeBitmap  = direct2DPixelData;
             imageClipArea = { direct2DPixelData->width, direct2DPixelData->height };
@@ -1481,7 +1484,7 @@ void Direct2DGraphicsContext::drawImage (const Image& imageIn, const AffineTrans
 
         auto drawTiles = [&] (const auto& pixelData, auto&& getRect)
         {
-            for (const auto& page : pixelData->getPagesForContext (deviceContext))
+            for (const auto& page : pixelData->getPagesForDevice (D2DUtilities::getDeviceForContext (deviceContext)))
             {
                 const auto pageBounds = page.getBounds();
                 const auto intersection = pageBounds.toFloat().getIntersection (imageClipArea.toFloat());
