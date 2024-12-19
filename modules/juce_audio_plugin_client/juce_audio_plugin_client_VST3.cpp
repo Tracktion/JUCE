@@ -527,20 +527,18 @@ public:
 
     tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID, Steinberg::int32) override
     {
-        String name;
-        for (int i = 0; i < 127; i++)
-            if (audioProcessor->hasNameForMidiNoteNumber (i, 1, name) == kResultTrue)
+        for (int i = 0; i <= 127; ++i)
+            if (audioProcessor->getNameForMidiNoteNumber (i, 1))
                 return kResultTrue;
 
         return kResultFalse;
     }
 
-    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16 midiNote, Vst::String128 name) override
+    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16 midiNote, Vst::String128 nameOut) override
     {
-        String nameOut;
-        if (audioProcessor->hasNameForMidiNoteNumber (midiNote, 1, nameOut))
+        if (auto name = audioProcessor->getNameForMidiNoteNumber (midiNote, 1))
         {
-            toString128 (name, nameOut);
+            toString128 (nameOut, *name);
             return kResultTrue;
         }
 
@@ -1173,14 +1171,14 @@ public:
                 {
                     Vst::String128 channelName;
                     if (list->getString (Vst::ChannelContext::kChannelNameKey, channelName, sizeof (channelName)) == kResultTrue)
-                        trackProperties.name = toString (channelName);
+                        trackProperties.name = std::make_optional (toString (channelName));
                 }
 
                 {
                     Steinberg::int64 colour;
                     if (list->getInt (Vst::ChannelContext::kChannelColorKey, colour) == kResultTrue)
-                        trackProperties.colour = Colour (Vst::ChannelContext::GetRed ((uint32) colour),  Vst::ChannelContext::GetGreen ((uint32) colour),
-                                                         Vst::ChannelContext::GetBlue ((uint32) colour), Vst::ChannelContext::GetAlpha ((uint32) colour));
+                        trackProperties.colour = std::make_optional (Colour (Vst::ChannelContext::GetRed ((uint32) colour),  Vst::ChannelContext::GetGreen ((uint32) colour),
+                                                                             Vst::ChannelContext::GetBlue ((uint32) colour), Vst::ChannelContext::GetAlpha ((uint32) colour)));
                 }
 
 

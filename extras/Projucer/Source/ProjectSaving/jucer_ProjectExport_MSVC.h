@@ -1910,17 +1910,22 @@ public:
                 const auto pkgScript = copyBuildOutputIntoBundle (segments);
                 const auto copyScript = copyBundleToInstallDirectory (segments, config.getBinaryPath (Ids::vst3BinaryLocation, arch));
 
-                const auto binCopyScript = config.isPluginBinaryCopyStepEnabled()
-                                         ? MSVCScriptBuilder{}.append ("copy /Y \"$(OutDir)$(TargetFileName)\" \""
-                                                                       + config.getBinaryPath (Ids::vstBinaryLocation, arch)
-                                                                       + "\\$(TargetFileName)\"")
-                                         : MSVCScriptBuilder{};
-
                 return MSVCScriptBuilder{}
                     .append (pkgScript)
                     .append (manifestScript)
                     .append (copyScript)
-                    .append (binCopyScript)
+                    .build();
+            }
+
+            if (type == VSTPlugIn && config.isPluginBinaryCopyStepEnabled())
+            {
+                const String copyCommand = "copy /Y \"$(OutDir)$(TargetFileName)\" \""
+                                         + config.getBinaryPath (Ids::vstBinaryLocation, arch)
+                                         + "\\$(TargetFileName)\"";
+
+                return MSVCScriptBuilder{}
+                    .mkdir (config.getBinaryPath (Ids::vstBinaryLocation, arch).quoted())
+                    .append (copyCommand)
                     .build();
             }
 
@@ -1946,6 +1951,30 @@ public:
                 return script.build();
             };
 
+            MSVCScriptBuilder builder;
+
+            if (arch == Architecture::win64)
+            {
+                const auto x86ToolchainErrorMessage =
+                    "echo : Error: Toolchain configuration error!\r\n"
+                    "echo : Error: ------ WARNING ------\r\n"
+                    "echo You are using a 32-bit toolchain to compile a 64-bit target on a 64-bit system.\r\n"
+                    "echo This may cause problems with the build system.\r\n"
+                    "echo To resolve this, use the x64 version of MSBuild. You can invoke it directly at:\r\n"
+                    "echo \"<VisualStudioPathHere>/MSBuild/Current/Bin/amd64/MSBuild.exe\"\r\n"
+                    "echo Or, use the \"x64 Native Tools Command Prompt\" script.\r\n"
+                    "echo : Error: ------ WARNING ------\r\n"
+                    "exit 1";
+
+                builder.ifAllConditionsTrue (
+                {
+                    "\"$(PROCESSOR_ARCHITECTURE)\" == " + getVisualStudioArchitectureId (Architecture::win32).quoted(),
+
+                    // This only exists if the process is x86 but the host is x64.
+                    "defined PROCESSOR_ARCHITEW6432"
+                }, MSVCScriptBuilder{}.append (x86ToolchainErrorMessage));
+            }
+
             if (type == LV2PlugIn)
             {
                 const auto crossCompilationPairs =
@@ -1954,8 +1983,6 @@ public:
                     std::pair { Architecture::arm64, Architecture::win64 },
                     std::pair { arch, arch }
                 };
-
-                MSVCScriptBuilder builder;
 
                 for (auto [hostArch, targetArch] : crossCompilationPairs)
                 {
@@ -1984,7 +2011,7 @@ public:
                 return createBundleStructure (getAaxBundleStructure (config, arch));
 
             if (type == VST3PlugIn)
-                return createBundleStructure (getVst3BundleStructure (config, arch));
+                return builder.build() + "\r\n" + createBundleStructure (getVst3BundleStructure (config, arch));
 
             return {};
         }
@@ -1997,10 +2024,8 @@ public:
             if (post.isNotEmpty() || extra.isNotEmpty())
             {
                 return MSVCScriptBuilder{}
-                    .append ("cmd /c (")
                     .append (post.replace ("\n", "\r\n"))
                     .append (extra)
-                    .append (")")
                     .build();
             }
 
@@ -2015,10 +2040,8 @@ public:
             if (pre.isNotEmpty() || extra.isNotEmpty())
             {
                 return MSVCScriptBuilder{}
-                    .append ("cmd /c (")
                     .append (pre.replace ("\n", "\r\n"))
                     .append (extra)
-                    .append (")")
                     .build();
             }
 
