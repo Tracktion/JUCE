@@ -35,25 +35,24 @@
 namespace juce
 {
 
-class Direct2DImageContext : public Direct2DGraphicsContext
+/*  A single bitmap that represents a subsection of a virtual bitmap. */
+struct Direct2DPixelDataPage
 {
-public:
-    Direct2DImageContext (ComSmartPtr<ID2D1DeviceContext1>,
-                          ComSmartPtr<ID2D1Bitmap1>,
-                          const RectangleList<int>&);
+    /*  The bounds of the stored bitmap inside the virtual bitmap. */
+    Rectangle<int> getBounds() const
+    {
+        if (bitmap == nullptr)
+            return {};
 
-    ~Direct2DImageContext() override;
+        const auto size = bitmap->GetPixelSize();
+        return Rectangle { (int) size.width, (int) size.height }.withPosition (topLeft);
+    }
 
-    ComSmartPtr<ID2D1DeviceContext1> getDeviceContext() const;
+    /*  The stored subsection bitmap. */
+    ComSmartPtr<ID2D1Bitmap1> bitmap;
 
-private:
-    struct ImagePimpl;
-    std::unique_ptr<ImagePimpl> pimpl;
-
-    Pimpl* getPimpl() const noexcept override;
-    void clearTargetBuffer() override;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DImageContext)
+    /*  The top-left position of this virtual bitmap inside the virtual bitmap. */
+    Point<int> topLeft;
 };
 
 } // namespace juce
