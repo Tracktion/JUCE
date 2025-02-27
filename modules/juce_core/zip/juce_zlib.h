@@ -32,27 +32,24 @@
   ==============================================================================
 */
 
-#include <juce_core/system/juce_TargetPlatform.h>
-#include <juce_audio_plugin_client/detail/juce_CheckSettingMacros.h>
+// The purpose of this internal header, included by juce_core and juce_graphics,
+// is to place the zlib symbols in a common namespace with consistent preprocessor
+// definitions.
 
-#if JucePlugin_Enable_ARA
+#pragma once
 
-#include <juce_audio_plugin_client/detail/juce_IncludeSystemHeaders.h>
-#include <juce_audio_plugin_client/detail/juce_IncludeModuleHeaders.h>
+namespace juce::zlibNamespace
+{
+#define ZLIB_CONST 1
 
-JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunused-parameter",
-                                     "-Wgnu-zero-variadic-macro-arguments",
-                                     "-Wmissing-prototypes",
-                                     "-Wfloat-equal",
-                                     "-Wc++20-extensions")
-JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4100)
+#if JUCE_INCLUDE_ZLIB_CODE
 
-#include <ARA_Library/PlugIn/ARAPlug.cpp>
-#include <ARA_Library/Dispatch/ARAPlugInDispatch.cpp>
-#include <ARA_Library/Utilities/ARAPitchInterpretation.cpp>
-#include <ARA_Library/Utilities/ARAChannelArrangement.cpp>
+ #define HAVE_MEMCPY 1
 
-JUCE_END_IGNORE_WARNINGS_MSVC
-JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+ #include "juce_core/zip/zlib/zlib.h"
 
+#else
+ #include JUCE_ZLIB_INCLUDE_PATH
 #endif
+
+} // namespace juce::zlibNamespace
