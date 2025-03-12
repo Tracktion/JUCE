@@ -86,4 +86,3 @@ jobs:
       triggerer: ${{ inputs.triggerer && inputs.triggerer || github.event.sender.login }}
       context: ${{ toJson(needs) }}
     secrets: inherit
-
