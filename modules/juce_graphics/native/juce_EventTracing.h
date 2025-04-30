@@ -290,17 +290,17 @@ auto toVector (const RectangleList<Number>& list)
         { \
             const std::vector<INT32> vec = ::juce::etw::toVector (rect); \
             JUCE_WRITE_TRACE_LOG_VA (code,                              \
-                                  etw::softwareRendererKeyword,      \
-                                  TraceLoggingValue ((UINT64) frameNumber, "frame"), \
-                                  TraceLoggingInt32Array (vec.data(), (UINT16) vec.size(), "rect")); \
+                                     etw::softwareRendererKeyword,      \
+                                     TraceLoggingValue ((UINT64) frameNumber, "frame"), \
+                                     TraceLoggingInt32Array (vec.data(), (UINT16) vec.size(), "rect")); \
         }
 
     #define JUCE_TRACE_EVENT_INT_RECT(code, keyword, rect) \
         { \
             const std::vector<INT32> vec = ::juce::etw::toVector (rect); \
             JUCE_WRITE_TRACE_LOG_VA (code,                              \
-                                  etw::softwareRendererKeyword,      \
-                                  TraceLoggingInt32Array (vec.data(), (UINT16) vec.size(), "rect")); \
+                                     etw::softwareRendererKeyword,      \
+                                     TraceLoggingInt32Array (vec.data(), (UINT16) vec.size(), "rect")); \
         }
 #else
     #define JUCE_TRACE_EVENT_INT_RECT_LIST(code, keyword, frameNumber, rect)
