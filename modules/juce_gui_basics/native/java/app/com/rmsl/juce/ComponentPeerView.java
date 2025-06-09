@@ -34,6 +34,10 @@
 
 package com.rmsl.juce;
 
+import static android.view.WindowInsetsController.BEHAVIOR_DEFAULT;
+import static android.view.WindowInsetsController.BEHAVIOR_SHOW_BARS_BY_SWIPE;
+import static android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE;
+
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
@@ -44,31 +48,33 @@ import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Build;
-import android.text.Selection;
-import android.text.SpanWatcher;
-import android.text.Spannable;
-import android.text.Spanned;
-import android.text.TextWatcher;
-import android.util.Pair;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Selection;
+import android.text.SpanWatcher;
+import android.text.Spannable;
 import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.TextWatcher;
+import android.util.Pair;
 import android.view.Choreographer;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
-import android.view.accessibility.AccessibilityNodeProvider;
-import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.accessibility.AccessibilityManager;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 
 import java.util.List;
@@ -80,7 +86,7 @@ public final class ComponentPeerView extends ViewGroup
     {
         super (context);
 
-        if (Application.class.isInstance (context))
+        if (context instanceof Application)
         {
             ((Application) context).registerActivityLifecycleCallbacks (this);
         }
@@ -183,10 +189,51 @@ public final class ComponentPeerView extends ViewGroup
     private final Paint paint = new Paint();
 
     //==============================================================================
-    private native void handleMouseDown (long host, int index, float x, float y, long time);
-    private native void handleMouseDrag (long host, int index, float x, float y, long time);
-    private native void handleMouseUp (long host, int index, float x, float y, long time);
-    private native void handleAccessibilityHover (long host, int action, float x, float y, long time);
+    private static native void handleMouseDown (long host, int index, float x, float y, long time);
+    private static native void handleMouseDrag (long host, int index, float x, float y, long time);
+    private static native void handleMouseUp (long host, int index, float x, float y, long time);
+    private static native void handleAccessibilityHover (long host, int action, float x, float y, long time);
+
+    @FunctionalInterface
+    private interface MouseHandler
+    {
+        void handle (long host, int index, float x, float y, long time);
+    }
+
+    void handleMultiPointerEvent (MotionEvent event, MouseHandler callback)
+    {
+        long time = event.getEventTime();
+        callback.handle (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
+
+        int n = event.getPointerCount();
+
+        if (n > 1)
+        {
+            int point[] = new int[2];
+            getLocationOnScreen (point);
+
+            for (int i = 1; i < n; ++i)
+                callback.handle (host, event.getPointerId (i), event.getX (i) + point[0], event.getY (i) + point[1], time);
+        }
+    }
+
+    void handleSecondaryPointerEvent (MotionEvent event, MouseHandler callback)
+    {
+        long time = event.getEventTime();
+        int i = event.getActionIndex();
+
+        if (i == 0)
+        {
+            callback.handle (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
+        }
+        else
+        {
+            int point[] = new int[2];
+            getLocationOnScreen (point);
+
+            callback.handle (host, event.getPointerId (i), event.getX (i) + point[0], event.getY (i) + point[1], time);
+        }
+    }
 
     @Override
     public boolean onTouchEvent (MotionEvent event)
@@ -203,64 +250,25 @@ public final class ComponentPeerView extends ViewGroup
                 handleMouseDown (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
                 return true;
 
-            case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
                 handleMouseUp (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
                 return true;
 
-            case MotionEvent.ACTION_MOVE:
-            {
-                handleMouseDrag (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
-
-                int n = event.getPointerCount();
-
-                if (n > 1)
-                {
-                    int point[] = new int[2];
-                    getLocationOnScreen (point);
-
-                    for (int i = 1; i < n; ++i)
-                        handleMouseDrag (host, event.getPointerId (i), event.getX (i) + point[0], event.getY (i) + point[1], time);
-                }
-
+            case MotionEvent.ACTION_CANCEL:
+                handleMultiPointerEvent (event, ComponentPeerView::handleMouseUp);
                 return true;
-            }
+
+            case MotionEvent.ACTION_MOVE:
+                handleMultiPointerEvent (event, ComponentPeerView::handleMouseDrag);
+                return true;
 
             case MotionEvent.ACTION_POINTER_UP:
-            {
-                int i = (action & MotionEvent.ACTION_POINTER_INDEX_MASK) >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
-
-                if (i == 0)
-                {
-                    handleMouseUp (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
-                }
-                else
-                {
-                    int point[] = new int[2];
-                    getLocationOnScreen (point);
-
-                    handleMouseUp (host, event.getPointerId (i), event.getX (i) + point[0], event.getY (i) + point[1], time);
-                }
+                handleSecondaryPointerEvent (event, ComponentPeerView::handleMouseUp);
                 return true;
-            }
 
             case MotionEvent.ACTION_POINTER_DOWN:
-            {
-                int i = (action & MotionEvent.ACTION_POINTER_INDEX_MASK) >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
-
-                if (i == 0)
-                {
-                    handleMouseDown (host, event.getPointerId (0), event.getRawX(), event.getRawY(), time);
-                }
-                else
-                {
-                    int point[] = new int[2];
-                    getLocationOnScreen (point);
-
-                    handleMouseDown (host, event.getPointerId (i), event.getX (i) + point[0], event.getY (i) + point[1], time);
-                }
+                handleSecondaryPointerEvent (event, ComponentPeerView::handleMouseDown);
                 return true;
-            }
 
             default:
                 break;
@@ -796,35 +804,53 @@ public final class ComponentPeerView extends ViewGroup
     {
     }
 
-    public void setSystemUiVisibilityCompat (int visibility)
+    public void setSystemUiVisibilityCompat (Window window, boolean visible)
     {
-        Method systemUIVisibilityMethod = null;
-        try
+        if (30 <= Build.VERSION.SDK_INT)
         {
-            systemUIVisibilityMethod = this.getClass().getMethod ("setSystemUiVisibility", int.class);
-        }
-        catch (SecurityException e)
-        {
-            return;
-        }
-        catch (NoSuchMethodException e)
-        {
-            return;
-        }
-        if (systemUIVisibilityMethod == null) return;
+            WindowInsetsController controller = getWindowInsetsController();
 
-        try
-        {
-            systemUIVisibilityMethod.invoke (this, visibility);
+            if (controller != null)
+            {
+                if (visible)
+                {
+                    controller.show (WindowInsets.Type.systemBars());
+                    controller.setSystemBarsBehavior (31 <= Build.VERSION.SDK_INT ? BEHAVIOR_DEFAULT
+                                                                                  : BEHAVIOR_SHOW_BARS_BY_SWIPE);
+                }
+                else
+                {
+                    controller.hide (WindowInsets.Type.systemBars());
+                    controller.setSystemBarsBehavior (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                }
+
+                return;
+            }
         }
-        catch (java.lang.IllegalArgumentException e)
+
+        if (window == null)
+            return;
+
+        // Displays::findDisplays queries the DecorView to determine the
+        // most recently-requested visibility state of the system UI.
+        // As we're creating new top-level views via WindowManager,
+        // updating only the DecorView isn't sufficient to hide the global
+        // system UI; we also need to update the view that was added to
+        // the WindowManager.
+        ArrayList<View> views = new ArrayList<>();
+        views.add (window.getDecorView());
+        views.add (this);
+
+        for (View view : views)
         {
-        }
-        catch (java.lang.IllegalAccessException e)
-        {
-        }
-        catch (java.lang.reflect.InvocationTargetException e)
-        {
+            final int prevFlags = view.getSystemUiVisibility();
+            final int fullScreenFlags = SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                      | SYSTEM_UI_FLAG_FULLSCREEN
+                                      | SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            final int newFlags = visible ? (prevFlags & ~fullScreenFlags)
+                                         : (prevFlags |  fullScreenFlags);
+
+            view.setSystemUiVisibility (newFlags);
         }
     }
 
