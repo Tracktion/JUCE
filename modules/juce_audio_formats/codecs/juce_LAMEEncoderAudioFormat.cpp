@@ -50,36 +50,39 @@ public:
     {
         WavAudioFormat wavFormat;
 
-        if (auto out = tempWav.getFile().createOutputStream())
+        writer = wavFormat.createWriterFor (tempWav.getFile().createOutputStream(),
+                                            AudioFormatWriter::Options{}.withSampleRate (sampleRateIn)
+                                                                        .withNumChannels ((int) numberOfChannels)
+                                                                        .withBitsPerSample (bitsPerSampleIn)
+                                                                        .withMetadataValues (metadata));
+
+        if (writer == nullptr)
+            return;
+
+        args.add (appFile.getFullPathName());
+
+        args.add ("--quiet");
+
+        if (cbrBitrate == 0)
         {
-            writer.reset (wavFormat.createWriterFor (out.release(), sampleRateIn, numChannels,
-                                                     bitsPerSampleIn, metadata, 0));
-
-            args.add (appFile.getFullPathName());
-
-            args.add ("--quiet");
-
-            if (cbrBitrate == 0)
-            {
-                args.add ("--vbr-new");
-                args.add ("-V");
-                args.add (String (vbrLevel));
-            }
-            else
-            {
-                args.add ("--cbr");
-                args.add ("-b");
-                args.add (String (cbrBitrate));
-            }
-
-            addMetadataArg (metadata, "id3title",       "--tt");
-            addMetadataArg (metadata, "id3artist",      "--ta");
-            addMetadataArg (metadata, "id3album",       "--tl");
-            addMetadataArg (metadata, "id3comment",     "--tc");
-            addMetadataArg (metadata, "id3date",        "--ty");
-            addMetadataArg (metadata, "id3genre",       "--tg");
-            addMetadataArg (metadata, "id3trackNumber", "--tn");
+            args.add ("--vbr-new");
+            args.add ("-V");
+            args.add (String (vbrLevel));
         }
+        else
+        {
+            args.add ("--cbr");
+            args.add ("-b");
+            args.add (String (cbrBitrate));
+        }
+
+        addMetadataArg (metadata, "id3title",       "--tt");
+        addMetadataArg (metadata, "id3artist",      "--ta");
+        addMetadataArg (metadata, "id3album",       "--tl");
+        addMetadataArg (metadata, "id3comment",     "--tc");
+        addMetadataArg (metadata, "id3date",        "--ty");
+        addMetadataArg (metadata, "id3genre",       "--tg");
+        addMetadataArg (metadata, "id3trackNumber", "--tn");
     }
 
     void addMetadataArg (const StringPairArray& metadata, const char* key, const char* lameFlag)
@@ -165,10 +168,6 @@ LAMEEncoderAudioFormat::LAMEEncoderAudioFormat (const File& lameApplication)
 {
 }
 
-LAMEEncoderAudioFormat::~LAMEEncoderAudioFormat()
-{
-}
-
 bool LAMEEncoderAudioFormat::canHandleFile (const File&)
 {
     return false;
@@ -208,12 +207,8 @@ AudioFormatReader* LAMEEncoderAudioFormat::createReaderFor (InputStream*, const 
     return nullptr;
 }
 
-AudioFormatWriter* LAMEEncoderAudioFormat::createWriterFor (OutputStream* streamToWriteTo,
-                                                            double sampleRateToUse,
-                                                            unsigned int numberOfChannels,
-                                                            int bitsPerSample,
-                                                            const StringPairArray& metadataValues,
-                                                            int qualityOptionIndex)
+std::unique_ptr<AudioFormatWriter> LAMEEncoderAudioFormat::createWriterFor (std::unique_ptr<OutputStream> streamToWriteTo,
+                                                                            const AudioFormatWriterOptions& options)
 {
     if (streamToWriteTo == nullptr)
         return nullptr;
@@ -221,15 +216,22 @@ AudioFormatWriter* LAMEEncoderAudioFormat::createWriterFor (OutputStream* stream
     int vbr = 4;
     int cbr = 0;
 
-    const String qual (getQualityOptions() [qualityOptionIndex]);
+    const String qual (getQualityOptions() [options.getQualityOptionIndex()]);
 
     if (qual.contains ("VBR"))
         vbr = qual.retainCharacters ("0123456789").getIntValue();
     else
         cbr = qual.getIntValue();
 
-    return new Writer (streamToWriteTo, getFormatName(), lameApp, vbr, cbr,
-                       sampleRateToUse, numberOfChannels, bitsPerSample, metadataValues);
+    return std::make_unique<Writer> (streamToWriteTo.release(),
+                                     getFormatName(),
+                                     lameApp,
+                                     vbr,
+                                     cbr,
+                                     options.getSampleRate(),
+                                     (unsigned int) options.getNumChannels(),
+                                     options.getBitsPerSample(),
+                                     options.getMetadataValues());
 }
 
 #endif
