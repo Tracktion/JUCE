@@ -920,7 +920,6 @@ public:
             case Vst2::effGetNumMidiOutputChannels: return handleGetNumMidiOutputChannels();
             case Vst2::effGetMidiKeyName:           return handleGetMidiKeyName (args);
             case Vst2::effEditIdle:                 return handleEditIdle();
-            case Vst2::effGetMidiKeyName:           return handleGetMidiKeyName (args);
             default:                                return 0;
         }
     }
@@ -2073,22 +2072,6 @@ private:
         hostDrivenEventLoop->processPendingEvents();
        #endif
 
-        return 0;
-    }
-
-    pointer_sized_int handleGetMidiKeyName (VstOpCodeArguments args)
-    {
-        if (processor != nullptr)
-        {
-            String name;
-            Vst2::MidiKeyName* keyName = (Vst2::MidiKeyName*)args.ptr;
-
-            if (processor->hasNameForMidiNoteNumber (keyName->thisKeyNumber, args.index, name))
-            {
-                name.copyToUTF8 (keyName->keyName, sizeof (keyName->keyName));
-                return 1;
-            }
-        }
         return 0;
     }
 
