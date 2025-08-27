@@ -478,7 +478,16 @@ function(juce_add_binary_data target)
     endforeach()
 
     set(input_file_list "${juce_binary_data_folder}/input_file_list")
-    file(WRITE "${input_file_list}" "${newline_delimited_input}")
+
+    set(old_input_file_list "")
+
+    if(EXISTS "${input_file_list}")
+        file(READ "${input_file_list}" old_input_file_list)
+    endif()
+
+    if(NOT "${old_input_file_list}" STREQUAL "${newline_delimited_input}")
+        file(WRITE "${input_file_list}" "${newline_delimited_input}")
+    endif()
 
     add_custom_command(OUTPUT ${binary_file_names}
         COMMAND juce::juceaide binarydata "${JUCE_ARG_NAMESPACE}" "${JUCE_ARG_HEADER_NAME}"
@@ -1021,7 +1030,9 @@ endfunction()
 # ==================================================================================================
 
 function(_juce_add_vst3_manifest_helper_target shared_code_target)
-    if(TARGET juce_vst3_helper
+    set(vst3_helper_target ${shared_code_target}_vst3_helper)
+
+    if(TARGET ${vst3_helper_target}
        OR (CMAKE_SYSTEM_NAME STREQUAL "iOS")
        OR (CMAKE_SYSTEM_NAME STREQUAL "Android")
        OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
@@ -1039,7 +1050,6 @@ function(_juce_add_vst3_manifest_helper_target shared_code_target)
 
     set(source "${module_path}/juce_audio_plugin_client/VST3/juce_VST3ManifestHelper.${extension}")
 
-    set(vst3_helper_target ${shared_code_target}_vst3_helper)
     add_executable(${vst3_helper_target} "${source}")
     add_executable(juce::${vst3_helper_target} ALIAS ${vst3_helper_target})
 
