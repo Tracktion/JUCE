@@ -118,8 +118,9 @@ using namespace juce;
 #include <juce_audio_plugin_client/detail/juce_LinuxMessageThread.h>
 #include <juce_audio_plugin_client/detail/juce_VSTWindowUtilities.h>
 
-#include <juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp>
-#include <juce_audio_processors/format_types/juce_VSTCommon.h>
+#include <juce_audio_processors_headless/format_types/juce_LegacyAudioParameter.h>
+#include <juce_audio_processors_headless/format_types/juce_VSTCommon.h>
+#include <juce_audio_processors_headless/format_types/juce_VSTMidiEventList.h>
 
 #ifdef JUCE_MSVC
  #pragma pack (pop)

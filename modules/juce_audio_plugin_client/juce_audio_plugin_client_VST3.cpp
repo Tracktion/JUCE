@@ -48,7 +48,7 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
  #define JUCE_VST3HEADERS_INCLUDE_HEADERS_ONLY 1
 #endif
 
-#include <juce_audio_processors/format_types/juce_VST3Headers.h>
+#include <juce_audio_processors_headless/format_types/juce_VST3Headers.h>
 
 #undef JUCE_VST3HEADERS_INCLUDE_HEADERS_ONLY
 #define JUCE_GUI_BASICS_INCLUDE_XHEADERS 1
@@ -61,10 +61,10 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
 #include <juce_gui_basics/native/juce_WindowsHooks_windows.h>
 
 //==============================================================================
-#include <juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp>
-#include <juce_audio_processors/utilities/juce_FlagCache.h>
-#include <juce_audio_processors/format_types/juce_VST3Utilities.h>
-#include <juce_audio_processors/format_types/juce_VST3Common.h>
+#include <juce_audio_processors_headless/format_types/juce_LegacyAudioParameter.h>
+#include <juce_audio_processors_headless/utilities/juce_FlagCache.h>
+#include <juce_audio_processors_headless/format_types/juce_VST3Utilities.h>
+#include <juce_audio_processors_headless/format_types/juce_VST3Common.h>
 #include <juce_audio_plugin_client/VST3/juce_VST3ModuleInfo.h>
 
 #if JUCE_VST3_CAN_REPLACE_VST2 && ! JUCE_FORCE_USE_LEGACY_PARAM_IDS && ! JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING
@@ -1158,8 +1158,7 @@ public:
                 {
                     Steinberg::int64 colour;
                     if (list->getInt (Vst::ChannelContext::kChannelColorKey, colour) == kResultTrue)
-                        trackProperties.colour = std::make_optional (Colour (Vst::ChannelContext::GetRed ((uint32) colour),  Vst::ChannelContext::GetGreen ((uint32) colour),
-                                                                             Vst::ChannelContext::GetBlue ((uint32) colour), Vst::ChannelContext::GetAlpha ((uint32) colour)));
+                        trackProperties.colourARGB.emplace ((uint32) colour);
                 }
 
 

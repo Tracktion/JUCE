@@ -51,9 +51,7 @@
   license:            AGPLv3/Commercial
   minimumCppStandard: 17
 
-  dependencies:       juce_gui_extra, juce_audio_basics
-  OSXFrameworks:      CoreAudio CoreMIDI AudioToolbox
-  iOSFrameworks:      AudioToolbox
+  dependencies:       juce_gui_extra, juce_audio_processors_headless
 
  END_JUCE_MODULE_DECLARATION
 
@@ -63,9 +61,8 @@
 #pragma once
 #define JUCE_AUDIO_PROCESSORS_H_INCLUDED
 
-#include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_audio_processors_headless/juce_audio_processors_headless.h>
 #include <juce_gui_extra/juce_gui_extra.h>
-#include <juce_audio_basics/juce_audio_basics.h>
 
 //==============================================================================
 /** Config: JUCE_PLUGINHOST_VST
@@ -140,46 +137,21 @@
 #endif
 
 //==============================================================================
-#include "utilities/juce_AAXClientExtensions.h"
-#include "utilities/juce_VST2ClientExtensions.h"
-#include "utilities/juce_VST3Interface.h"
-#include "utilities/juce_VST3ClientExtensions.h"
-#include "format_types/juce_ARACommon.h"
-#include "utilities/juce_ExtensionsVisitor.h"
-#include "processors/juce_AudioProcessorParameter.h"
-#include "processors/juce_HostedAudioProcessorParameter.h"
 #include "processors/juce_AudioProcessorEditorHostContext.h"
 #include "processors/juce_AudioProcessorEditor.h"
-#include "processors/juce_AudioProcessorListener.h"
-#include "processors/juce_AudioProcessorParameterGroup.h"
-#include "processors/juce_AudioProcessor.h"
-#include "processors/juce_PluginDescription.h"
-#include "processors/juce_AudioPluginInstance.h"
-#include "processors/juce_AudioProcessorGraph.h"
 #include "processors/juce_GenericAudioProcessorEditor.h"
-#include "format/juce_AudioPluginFormat.h"
-#include "format/juce_AudioPluginFormatManager.h"
+#include "format/juce_AudioPluginFormatManagerHelpers.h"
 #include "scanning/juce_KnownPluginList.h"
 #include "format_types/juce_AudioUnitPluginFormat.h"
 #include "format_types/juce_LADSPAPluginFormat.h"
 #include "format_types/juce_LV2PluginFormat.h"
 #include "format_types/juce_VST3PluginFormat.h"
-#include "format_types/juce_VSTMidiEventList.h"
 #include "format_types/juce_VSTPluginFormat.h"
-#include "format_types/juce_ARAHosting.h"
 #include "scanning/juce_PluginDirectoryScanner.h"
 #include "scanning/juce_PluginListComponent.h"
-#include "utilities/juce_AudioProcessorParameterWithID.h"
-#include "utilities/juce_RangedAudioParameter.h"
-#include "utilities/juce_AudioParameterFloat.h"
-#include "utilities/juce_AudioParameterInt.h"
-#include "utilities/juce_AudioParameterBool.h"
-#include "utilities/juce_AudioParameterChoice.h"
 #include "utilities/juce_ParameterAttachments.h"
 #include "utilities/juce_AudioProcessorValueTreeState.h"
 #include "utilities/juce_PluginHostType.h"
-#include "utilities/ARA/juce_ARADebug.h"
-#include "utilities/ARA/juce_ARA_utils.h"
 
 //==============================================================================
 // These declarations are here to avoid missing-prototype warnings in user code.
