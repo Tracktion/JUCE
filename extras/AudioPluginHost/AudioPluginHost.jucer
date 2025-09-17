@@ -2,8 +2,7 @@
 
 <JUCERPROJECT id="NTe0XB0ij" name="AudioPluginHost" projectType="guiapp" version="1.0.0"
               juceFolder="../../../juce" bundleIdentifier="com.juce.audiopluginhost"
-              companyName="Raw Material Software Limited"
-              companyCopyright="Raw Material Software Limited"
+              companyName="Raw Material Software Limited" companyCopyright="Raw Material Software Limited"
               useAppConfig="0" addUsingNamespaceToJuceHeader="1" jucerFormatVersion="1">
   <EXPORTFORMATS>
     <XCODE_MAC targetFolder="Builds/MacOSX" smallIcon="c97aUr" bigIcon="c97aUr"
@@ -31,6 +30,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </XCODE_MAC>
     <LINUX_MAKE targetFolder="Builds/LinuxMakefile" smallIcon="c97aUr" bigIcon="c97aUr">
@@ -53,6 +53,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </LINUX_MAKE>
     <VS2019 targetFolder="Builds/VisualStudio2019" smallIcon="c97aUr" bigIcon="c97aUr"
@@ -76,6 +77,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </VS2019>
     <VS2022 targetFolder="Builds/VisualStudio2022" smallIcon="c97aUr" bigIcon="c97aUr"
@@ -99,6 +101,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </VS2022>
     <XCODE_IPHONE targetFolder="Builds/iOS" iosScreenOrientation="" iPadScreenOrientation=""
@@ -126,6 +129,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </XCODE_IPHONE>
     <ANDROIDSTUDIO targetFolder="Builds/Android" androidMinimumSDK="24" androidInternetNeeded="1"
@@ -153,6 +157,7 @@
         <MODULEPATH id="juce_audio_devices" path="../../modules"/>
         <MODULEPATH id="juce_audio_basics" path="../../modules"/>
         <MODULEPATH id="juce_dsp" path="../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../modules"/>
       </MODULEPATHS>
     </ANDROIDSTUDIO>
   </EXPORTFORMATS>
@@ -205,6 +210,7 @@
     <MODULE id="juce_audio_devices" showAllCode="1"/>
     <MODULE id="juce_audio_formats" showAllCode="1"/>
     <MODULE id="juce_audio_processors" showAllCode="1"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1"/>
     <MODULE id="juce_audio_utils" showAllCode="1"/>
     <MODULE id="juce_core" showAllCode="1"/>
     <MODULE id="juce_cryptography" showAllCode="1"/>

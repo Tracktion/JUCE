@@ -54,8 +54,8 @@
 #include <juce_audio_basics/native/juce_CoreAudioLayouts_mac.h>
 #include <juce_audio_basics/native/juce_CoreAudioTimeConversions_mac.h>
 #include <juce_audio_basics/native/juce_AudioWorkgroup_mac.h>
-#include <juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp>
-#include <juce_audio_processors/format_types/juce_AU_Shared.h>
+#include <juce_audio_processors_headless/format_types/juce_LegacyAudioParameter.h>
+#include <juce_audio_processors_headless/format_types/juce_AU_Shared.h>
 
 #define JUCE_VIEWCONTROLLER_OBJC_NAME(x) JUCE_JOIN_MACRO (x, FactoryAUv3)
 
@@ -1486,12 +1486,12 @@ private:
 
                     for (uint32_t i = 0; i < list.numPackets; ++i)
                     {
-                        converter.dispatch (reinterpret_cast<const uint32_t*> (packet->words),
-                                            reinterpret_cast<const uint32_t*> (packet->words + packet->wordCount),
+                        converter.dispatch ({ reinterpret_cast<const uint32_t*> (packet->words),
+                                              (size_t) packet->wordCount },
                                             static_cast<int> (packet->timeStamp - (MIDITimeStamp) startTime),
-                                            [this] (const ump::BytestreamMidiView& message)
+                                            [this] (const ump::BytesOnGroup& x, double t)
                                             {
-                                                midiMessages.addEvent (message.getMessage(), (int) message.timestamp);
+                                                midiMessages.addEvent ({ x.bytes.data(), (int) x.bytes.size(), t }, (int) t);
                                             });
 
                         packet = MIDIEventPacketNext (packet);
