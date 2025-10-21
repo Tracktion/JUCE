@@ -14,13 +14,23 @@
  * limitations under the License.
  */
 
-#ifndef _SB_INTERNAL_CODEPOINT_SEQUENCE_H
-#define _SB_INTERNAL_CODEPOINT_SEQUENCE_H
+#ifndef _SB_PUBLIC_RUN_H
+#define _SB_PUBLIC_RUN_H
 
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBBase.h>
-#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBCodepointSequence.h>
-#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBConfig.h>
 
-SB_INTERNAL SBBoolean SBCodepointSequenceIsValid(const SBCodepointSequence *codepointSequence);
+SB_EXTERN_C_BEGIN
+
+/**
+ * A structure containing the information of a sequence of characters having the same embedding
+ * level.
+ */
+typedef struct _SBRun {
+    SBUInteger offset; /**< The index to the first code unit of the run in source string. */
+    SBUInteger length; /**< The number of code units covering the length of the run. */
+    SBLevel level;     /**< The embedding level of the run. */
+} SBRun;
+
+SB_EXTERN_C_END
 
 #endif
