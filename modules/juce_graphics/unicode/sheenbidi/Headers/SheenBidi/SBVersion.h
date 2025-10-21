@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2025 Muhammad Tayyab Akram
+ * Copyright (C) 2025 Muhammad Tayyab Akram
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,28 @@
  * limitations under the License.
  */
 
-#ifndef _SB_INTERNAL_CODEPOINT_SEQUENCE_H
-#define _SB_INTERNAL_CODEPOINT_SEQUENCE_H
+#ifndef _SB_PUBLIC_VERSION_H
+#define _SB_PUBLIC_VERSION_H
 
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBBase.h>
-#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBCodepointSequence.h>
-#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBConfig.h>
 
-SB_INTERNAL SBBoolean SBCodepointSequenceIsValid(const SBCodepointSequence *codepointSequence);
+SB_EXTERN_C_BEGIN
+
+#define SHEENBIDI_VERSION_MAJOR     2
+#define SHEENBIDI_VERSION_MINOR     9
+#define SHEENBIDI_VERSION_PATCH     0
+#define SHEENBIDI_VERSION_STRING    "2.9.0"
+
+/**
+ * Returns the version string of the SheenBidi library.
+ *
+ * This function returns a constant null-terminated string representing the version of the linked
+ * SheenBidi library, in the format "MAJOR.MINOR.PATCH".
+ *
+ * @return A string representing the version (e.g. "2.9.0").
+ */
+SB_PUBLIC const char *SBVersionGetString(void);
+
+SB_EXTERN_C_END
 
 #endif

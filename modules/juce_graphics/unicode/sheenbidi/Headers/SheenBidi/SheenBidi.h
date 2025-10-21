@@ -14,29 +14,21 @@
  * limitations under the License.
  */
 
-#ifndef _SB_INTERNAL_LINE_H
-#define _SB_INTERNAL_LINE_H
+#ifndef _SHEEN_BIDI_H
+#define _SHEEN_BIDI_H
 
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBAlgorithm.h>
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBBase.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBBidiType.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBCodepoint.h>
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBCodepointSequence.h>
-#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBConfig.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBGeneralCategory.h>
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBLine.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBMirrorLocator.h>
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBParagraph.h>
 #include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBRun.h>
-
-#include "Object.h"
-
-typedef struct _SBLine {
-    Object _object;
-    SBCodepointSequence codepointSequence;
-    SBRun *fixedRuns;
-    SBUInteger runCount;
-    SBUInteger offset;
-    SBUInteger length;
-    SBUInteger retainCount;
-} SBLine;
-
-SB_INTERNAL SBLineRef SBLineCreate(SBParagraphRef paragraph,
-    SBUInteger lineOffset, SBUInteger lineLength);
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBScript.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBScriptLocator.h>
+#include <juce_graphics/unicode/sheenbidi/Headers/SheenBidi/SBVersion.h>
 
 #endif
