@@ -264,7 +264,7 @@ public:
     explicit OpaqueLayer (const Component&& c) = delete;
     explicit OpaqueLayer (const Component& c)
     {
-        appendOpaqueChildren (c);
+        appendOpaqueChildren (c, c.getPosition());
     }
 
     enum class ObscuredByKind
@@ -360,7 +360,7 @@ public:
     }
 
 private:
-    void appendOpaqueChildren (const Component& parent, Point<int> offset = {})
+    void appendOpaqueChildren (const Component& parent, Point<int> offset)
     {
         for (auto* child : parent.getChildren())
         {
@@ -1986,7 +1986,7 @@ Image Component::createComponentSnapshot (Rectangle<int> areaToGrab,
     auto w = roundToInt (scaleFactor * (float) r.getWidth());
     auto h = roundToInt (scaleFactor * (float) r.getHeight());
 
-    Image image (flags.opaqueFlag ? Image::RGB : Image::ARGB, w, h, true, imageType);
+    Image image (flags.opaqueFlag ? Image::RGB : Image::ARGB, w, h, ! flags.opaqueFlag, imageType);
 
     Graphics g (image);
 
