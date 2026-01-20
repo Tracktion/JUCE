@@ -1590,15 +1590,15 @@ public:
 
     bool contains (Point<int> localPos, bool trueIfInAChildWindow) const override
     {
-        const auto localPhysical = localPos.toFloat() / getPlatformScaleFactor();
-        auto r = D2DUtilities::toRectangle (getWindowScreenRect (hwnd)).toFloat();
+        const auto localPhysical = localPos.toFloat() * getPlatformScaleFactor();
+        const auto r = D2DUtilities::toRectangle (getWindowScreenRect (hwnd)).toFloat();
 
         if (! r.withZeroOrigin().contains (localPhysical))
             return false;
 
         const auto screenPos = (localPhysical + getClientRectInScreen().getPosition().toFloat()).roundToInt();
+        const auto w = WindowFromPoint (D2DUtilities::toPOINT (screenPos));
 
-        auto w = WindowFromPoint (D2DUtilities::toPOINT (screenPos));
         return w == hwnd || (trueIfInAChildWindow && (IsChild (hwnd, w) != 0));
     }
 
@@ -2096,6 +2096,7 @@ public:
     }
 
     bool hasTitleBar() const                 { return (styleFlags & windowHasTitleBar) != 0; }
+    bool isSizing() const                    { return sizing; }
 
 private:
     HWND hwnd, parentToAddTo;
@@ -3818,9 +3819,6 @@ private:
                 break;
 
             case WM_ERASEBKGND:
-                if (hasTitleBar())
-                    break;
-
                 return 1;
 
             case WM_NCCALCSIZE:
@@ -4745,11 +4743,9 @@ public:
 
         // If something in a paint handler calls, e.g. a message box, this can become reentrant and
         // corrupt the image it's using to paint into, so do a check here.
-        static bool reentrant = false;
-
         if (! reentrant)
         {
-            const ScopedValueSetter<bool> setter (reentrant, true, false);
+            const ScopedValueSetter setter (reentrant, true, false);
 
             if (peer.dontRepaint)
                 peer.getComponent().handleCommandMessage (0); // (this triggers a repaint in the openGL context)
@@ -5045,6 +5041,7 @@ private:
     HWNDComponentPeer& peer;
     TemporaryImage offscreenImageGenerator;
     RectangleList<int> deferredRepaints;
+    bool reentrant = false;
 };
 
 class D2DRenderContext : public RenderContext
@@ -5081,14 +5078,22 @@ public:
 
         updateRegion.findRECTAndValidate (peer.getHWND());
 
-        for (const auto& rect : updateRegion.getRects())
-            direct2DContext->addDeferredRepaint (D2DUtilities::toRectangle (rect));
+        if (peer.isSizing())
+        {
+            for (const auto& rect : updateRegion.getRects())
+                deferredRepaints.add (D2DUtilities::toRectangle (rect));
+        }
+        else
+        {
+            for (const auto& rect : updateRegion.getRects())
+                direct2DContext->addDeferredRepaint (D2DUtilities::toRectangle (rect));
 
-       #if JUCE_DIRECT2D_METRICS
-        lastPaintStartTicks = paintStartTicks;
-       #endif
+           #if JUCE_DIRECT2D_METRICS
+            lastPaintStartTicks = paintStartTicks;
+           #endif
 
-        handleDirect2DPaint();
+            handleDirect2DPaint();
+        }
     }
 
     void repaint (const Rectangle<int>& area) override
@@ -5105,10 +5110,20 @@ public:
 
     void onVBlank() override
     {
-        for (auto deferredRect : deferredRepaints)
+        if (peer.isSizing())
         {
-            auto r = D2DUtilities::toRECT (deferredRect);
-            InvalidateRect (peer.getHWND(), &r, FALSE);
+            for (const auto& rect : deferredRepaints)
+                direct2DContext->addDeferredRepaint (rect);
+
+            handleDirect2DPaint();
+        }
+        else
+        {
+            for (auto deferredRect : deferredRepaints)
+            {
+                auto r = D2DUtilities::toRECT (deferredRect);
+                InvalidateRect (peer.getHWND(), &r, FALSE);
+            }
         }
 
         deferredRepaints.clear();
