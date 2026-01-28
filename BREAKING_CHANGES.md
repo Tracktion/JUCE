@@ -1,5 +1,52 @@
 # JUCE breaking changes
 
+# develop
+
+## Change
+
+A new type member ARAConfigurationType has been added to
+ARADemoPluginDocumentControllerSpecialisation.
+
+**Possible Issues**
+
+In the unlikely case than an ARA document controller implementation previously
+added an ARAConfigurationType member to
+ARADemoPluginDocumentControllerSpecialisation, the code will fail to compile.
+
+**Workaround**
+
+The previous ARAConfigurationType member must be renamed.
+ARADemoPluginDocumentControllerSpecialisation::ARAConfigurationType from now on
+must be a type that has a static member function
+`ARA::ARAAPIGeneration getHighestSupportedApiGeneration()`.
+
+**Rationale**
+
+Supporting the partial persistency feature of ARA 2.3.0 required the addition
+of the new type member.
+
+
+## Change
+
+The ARA SDK required by JUCE has been updated to version 2.3.0.
+
+**Possible Issues**
+
+ARA Plugin builds using earlier versions of the ARA SDK will fail to compile.
+Additionally, the new ARA SDK version replaces the ARA::ChannelArrangement type
+with ARA::ChannelFormat.
+
+**Workaround**
+
+The ARA SDK configured in JUCE must be updated to version 2.3.0. If the plugin
+code depended on the ARA::ChannelArrangement type, it must use
+ARA::ChannelFormat in its stead.
+
+**Rationale**
+
+Version 2.3.0 is the latest official release of the ARA SDK.
+
+
 # Version 8.0.11
 
 ## Change
