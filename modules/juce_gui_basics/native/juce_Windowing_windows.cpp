@@ -501,7 +501,7 @@ private:
 
 ScopedThreadDPIAwarenessSetter::ScopedThreadDPIAwarenessSetter (void* nativeWindow)
 {
-    pimpl = std::make_unique<NativeImpl> ((HWND) nativeWindow);
+    pimpl = nativeWindow != nullptr ? std::make_unique<NativeImpl> ((HWND) nativeWindow) : nullptr;
 }
 
 ScopedThreadDPIAwarenessSetter::~ScopedThreadDPIAwarenessSetter() = default;
@@ -4315,6 +4315,7 @@ private:
         if (! hasMoved)    flags |= SWP_NOMOVE;
         if (! hasResized)  flags |= SWP_NOSIZE;
 
+        ScopedThreadDPIAwarenessSetter setter { hwnd };
         SetWindowPos (hwnd,
                       nullptr,
                       newBounds.getX(),
@@ -4324,9 +4325,7 @@ private:
                       flags);
 
         if (hasResized && isValidPeer (this))
-        {
             repaintNowIfTransparent();
-        }
     }
 
     bool sendInputAttemptWhenModalMessage()
