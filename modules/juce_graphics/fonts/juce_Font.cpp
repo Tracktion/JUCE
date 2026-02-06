@@ -220,7 +220,9 @@ public:
         const ScopedLock lock (mutex);
 
         if (auto ptr = getTypefacePtr (f))
-            return ptr->getNativeDetails()->getFontAtPointSizeAndScale (f.getHeightInPoints(), f.getHorizontalScale());
+            return ptr->getNativeDetails()->getFontAtPointSizeScaleAndVariations (f.getHeightInPoints(),
+                                                                                   f.getHorizontalScale(),
+                                                                                   f.getVariationSettings());
 
         return {};
     }
@@ -280,6 +282,20 @@ public:
     {
         jassert (getReferenceCount() == 1);
         options = options.withFeatureRemoved (feature);
+    }
+
+    auto getVariationSettings() const            { return options.getVariationSettings(); }
+
+    void setVariationSetting (const FontVariationSetting& variation)
+    {
+        jassert (getReferenceCount() == 1);
+        options = options.withVariationSetting (variation);
+    }
+
+    void removeVariationSetting (FontVariationTag variation)
+    {
+        jassert (getReferenceCount() == 1);
+        options = options.withVariationRemoved (variation);
     }
 
     std::optional<float> getAscentOverride() const  { return options.getAscentOverride(); }
@@ -780,6 +796,23 @@ void Font::removeFeatureSetting (FontFeatureTag featureToRemove)
 {
     dupeInternalIfShared();
     font->removeFeatureSetting (featureToRemove);
+}
+
+Span<const FontVariationSetting> Font::getVariationSettings() const&
+{
+    return font->getVariationSettings();
+}
+
+void Font::setVariationSetting (FontVariationSetting variationSetting)
+{
+    dupeInternalIfShared();
+    font->setVariationSetting (variationSetting);
+}
+
+void Font::removeVariationSetting (FontVariationTag variationToRemove)
+{
+    dupeInternalIfShared();
+    font->removeVariationSetting (variationToRemove);
 }
 
 void Font::setBold (const bool shouldBeBold)

@@ -93,6 +93,7 @@ auto FontOptions::tie() const
                        typeface.get(),
                        fallbacks,
                        features,
+                       variations,
                        metricsKind,
                        ascentOverride,
                        descentOverride,
@@ -136,6 +137,52 @@ FontOptions FontOptions::withFeatureRemoved (FontFeatureTag featureTag) const
     auto copy = *this;
 
     OrderedContainerHelpers::remove (copy.features, featureTag, FontFeatureSettingSortHelper{});
+
+    return copy;
+}
+
+struct FontVariationSettingSortHelper
+{
+    bool operator() (FontVariationSetting a, FontVariationSetting b) const
+    {
+        return a.tag < b.tag;
+    }
+
+    bool operator() (FontVariationTag a, FontVariationSetting b) const
+    {
+        return a < b.tag;
+    }
+
+    bool operator() (FontVariationSetting a, FontVariationTag b) const
+    {
+        return a.tag < b;
+    }
+};
+
+FontOptions FontOptions::withVariationSetting (FontVariationSetting newSetting) const
+{
+    auto copy = *this;
+
+    OrderedContainerHelpers::insertOrAssign (copy.variations, newSetting, FontVariationSettingSortHelper{});
+
+    return copy;
+}
+
+FontOptions FontOptions::withVariationRemoved (FontVariationTag variationTag) const
+{
+    auto copy = *this;
+
+    OrderedContainerHelpers::remove (copy.variations, variationTag, FontVariationSettingSortHelper{});
+
+    return copy;
+}
+
+FontOptions FontOptions::withNamedInstance (const FontVariationNamedInstance& instance) const
+{
+    auto copy = *this;
+
+    for (const auto& setting : instance.settings)
+        OrderedContainerHelpers::insertOrAssign (copy.variations, setting, FontVariationSettingSortHelper{});
 
     return copy;
 }
@@ -222,6 +269,79 @@ private:
 };
 
 static FontFeatureContainerTests fontFeatureContainerTests;
+
+class FontVariationContainerTests : public UnitTest
+{
+public:
+    FontVariationContainerTests() : UnitTest ("FontVariationContainerTests", UnitTestCategories::text)
+    {
+    }
+
+    void runTest() override
+    {
+        beginTest ("Variations can be set");
+        {
+            const auto options = FontOptions{}.withVariationSetting ({ "wght", 700.0f });
+
+            expectEquals ((int) options.getVariationSettings().size(), 1);
+            expect (options.getVariationSettings()[0].tag == FontVariationTag ("wght"));
+            expectEquals (options.getVariationSettings()[0].value, 700.0f);
+        }
+
+        beginTest ("Variations can be removed");
+        {
+            const auto options = FontOptions{}.withVariationSetting ({ "wght", 700.0f })
+                                              .withVariationRemoved ("wght");
+
+            expectEquals ((int) options.getVariationSettings().size(), 0);
+        }
+
+        beginTest ("Duplicate variations are not allowed");
+        {
+            const auto options = FontOptions{}.withVariationSetting ({ "wght", 400.0f })
+                                              .withVariationSetting ({ "wght", 700.0f });
+
+            expectEquals ((int) options.getVariationSettings().size(), 1);
+            expectEquals (options.getVariationSettings()[0].value, 700.0f);
+        }
+
+        beginTest ("Variations are always sorted by tag");
+        {
+            const auto options = FontOptions{}.withVariationSetting ({ "wght", 700.0f })
+                                              .withVariationSetting ({ "wdth", 100.0f })
+                                              .withVariationSetting ({ "opsz", 12.0f });
+
+            expectEquals ((int) options.getVariationSettings().size(), 3);
+            expect (options.getVariationSettings()[0].tag == FontVariationTag ("opsz"));
+            expect (options.getVariationSettings()[1].tag == FontVariationTag ("wdth"));
+            expect (options.getVariationSettings()[2].tag == FontVariationTag ("wght"));
+        }
+
+        beginTest ("Named instance applies all settings");
+        {
+            FontVariationNamedInstance instance;
+            instance.name = "Bold";
+            instance.settings.push_back ({ "wght", 700.0f });
+            instance.settings.push_back ({ "wdth", 100.0f });
+
+            const auto options = FontOptions{}.withNamedInstance (instance);
+
+            expectEquals ((int) options.getVariationSettings().size(), 2);
+        }
+
+        beginTest ("Variation settings include range metadata");
+        {
+            const auto setting = FontVariationSetting { "wght", 400.0f, 100.0f, 900.0f, 400.0f };
+
+            expectEquals (setting.value, 400.0f);
+            expectEquals (setting.minValue, 100.0f);
+            expectEquals (setting.maxValue, 900.0f);
+            expectEquals (setting.defaultValue, 400.0f);
+        }
+    }
+};
+
+static FontVariationContainerTests fontVariationContainerTests;
 
 #endif
 

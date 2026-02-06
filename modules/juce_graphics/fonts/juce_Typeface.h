@@ -222,6 +222,19 @@ public:
     */
     void getOutlineForGlyph (TypefaceMetricsKind, int glyphNumber, Path& path) const;
 
+    /** Returns the outline for a glyph with variation settings applied.
+        The path returned will be normalised to a font height of 1.0.
+
+        @param kind          the metrics kind to use
+        @param glyphNumber   the glyph ID
+        @param path          the path to fill with the glyph outline
+        @param variations    the variation axis settings to apply
+    */
+    void getOutlineForGlyph (TypefaceMetricsKind kind,
+                             int glyphNumber,
+                             Path& path,
+                             Span<const FontVariationSetting> variations) const;
+
     /** Returns glyph bounds, normalised to a font height of 1.0. */
     Rectangle<float> getGlyphBounds (TypefaceMetricsKind, int glyphNumber) const;
 
@@ -380,6 +393,48 @@ public:
         @see FontFeatureTag, FontFeatureSetting, FontOptions, Font
      */
     std::vector<FontFeatureTag> getSupportedFeatures() const;
+
+    /** Returns true if this typeface is a variable font with design-variation axes.
+
+        Variable fonts support continuous interpolation along dimensions such as
+        weight, width, and optical size. Use getVariationAxes() to query the
+        available axes and their ranges.
+
+        @see getVariationAxes(), getVariationNamedInstances()
+    */
+    bool isVariableFont() const;
+
+    /** Returns the available variation axes for this font.
+
+        Each FontVariationSetting in the returned vector will have its tag,
+        minValue, maxValue, and defaultValue populated from the font's metadata.
+        The value member will be set to the defaultValue.
+
+        Returns an empty vector if the font is not a variable font.
+
+        Common axes include:
+        - 'wght' (weight): typically 100-900
+        - 'wdth' (width): typically 50-200
+        - 'ital' (italic): 0-1
+        - 'slnt' (slant): typically -12 to 12 degrees
+        - 'opsz' (optical size): typically 6-144 points
+
+        @see FontVariationSetting, FontOptions::withVariationSetting()
+    */
+    std::vector<FontVariationSetting> getVariationAxes() const;
+
+    /** Returns the named instances available in this variable font.
+
+        Variable fonts can define preset combinations of axis values with names
+        like "Bold", "Light", "Condensed", etc. Each named instance includes a
+        display name and the variation settings that define it.
+
+        Returns an empty vector if the font has no named instances or is not
+        a variable font.
+
+        @see FontVariationNamedInstance, FontOptions::withNamedInstance()
+    */
+    std::vector<FontVariationNamedInstance> getVariationNamedInstances() const;
 
     /** @internal */
     class Native;

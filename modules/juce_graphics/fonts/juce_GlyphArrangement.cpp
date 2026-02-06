@@ -111,7 +111,7 @@ void PositionedGlyph::createPath (Path& path) const
         if (auto t = font.getTypefacePtr())
         {
             Path p;
-            t->getOutlineForGlyph (font.getMetricsKind(), glyph, p);
+            t->getOutlineForGlyph (font.getMetricsKind(), glyph, p, font.getVariationSettings());
 
             path.addPath (p, AffineTransform::scale (font.getHeight() * font.getHorizontalScale(), font.getHeight())
                                              .translated (x, y));
@@ -126,7 +126,7 @@ bool PositionedGlyph::hitTest (float px, float py) const
         if (auto t = font.getTypefacePtr())
         {
             Path p;
-            t->getOutlineForGlyph (font.getMetricsKind(), glyph, p);
+            t->getOutlineForGlyph (font.getMetricsKind(), glyph, p, font.getVariationSettings());
 
             AffineTransform::translation (-x, -y)
                             .scaled (1.0f / (font.getHeight() * font.getHorizontalScale()), 1.0f / font.getHeight())

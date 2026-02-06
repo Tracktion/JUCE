@@ -142,16 +142,28 @@ using HbDrawFuncs = JUCE_HB_PTR_TYPE (draw_funcs);
 
 //==============================================================================
 #if JUCE_MAC || JUCE_IOS
+// Struct to hold CTFontRef and its expected point size for advance calculations.
+// We need this because CTFontGetSize() may not always return the expected size,
+// especially after applying font variations via CTFontCreateCopyWithAttributes.
+struct CTFontAdvanceInfo
+{
+    CTFontRef font;
+    CGFloat expectedPointSize;  // The point size we requested when creating/copying the font
+};
+
 template <CTFontOrientation orientation>
-void getAdvancesForGlyphs (hb_font_t* hbFont, CTFontRef ctFont, Span<const CGGlyph> glyphs, Span<CGSize> advances)
+void getAdvancesForGlyphs (hb_font_t* hbFont, const CTFontAdvanceInfo& fontInfo, Span<const CGGlyph> glyphs, Span<CGSize> advances)
 {
     jassert (glyphs.size() == advances.size());
 
     int x, y;
     hb_font_get_scale (hbFont, &x, &y);
-    const auto scaleAdjustment = HbScale::hbToJuce (orientation == kCTFontOrientationHorizontal ? x : y) / CTFontGetSize (ctFont);
 
-    CTFontGetAdvancesForGlyphs (ctFont, orientation, std::data (glyphs), std::data (advances), (CFIndex) std::size (glyphs));
+    // Use the expected point size rather than querying CTFontGetSize, because
+    // CTFontGetSize may not return the expected value after applying variations
+    const auto scaleAdjustment = HbScale::hbToJuce (orientation == kCTFontOrientationHorizontal ? x : y) / fontInfo.expectedPointSize;
+
+    CTFontGetAdvancesForGlyphs (fontInfo.font, orientation, std::data (glyphs), std::data (advances), (CFIndex) std::size (glyphs));
 
     for (auto& advance : advances)
         (orientation == kCTFontOrientationHorizontal ? advance.width : advance.height) *= scaleAdjustment;
@@ -160,13 +172,13 @@ void getAdvancesForGlyphs (hb_font_t* hbFont, CTFontRef ctFont, Span<const CGGly
 template <CTFontOrientation orientation>
 static auto getAdvanceFn()
 {
-    return [] (hb_font_t* f, void*, hb_codepoint_t glyph, void* voidFontRef) -> hb_position_t
+    return [] (hb_font_t* f, void*, hb_codepoint_t glyph, void* voidFontInfo) -> hb_position_t
     {
-        auto* fontRef = static_cast<CTFontRef> (voidFontRef);
+        auto* fontInfo = static_cast<CTFontAdvanceInfo*> (voidFontInfo);
 
         const CGGlyph glyphs[] { (CGGlyph) glyph };
         CGSize advances[std::size (glyphs)]{};
-        getAdvancesForGlyphs<orientation> (f, fontRef, glyphs, advances);
+        getAdvancesForGlyphs<orientation> (f, *fontInfo, glyphs, advances);
 
         return HbScale::juceToHb ((float) (orientation == kCTFontOrientationHorizontal ? advances->width : advances->height));
     };
@@ -182,9 +194,9 @@ static auto getAdvancesFn()
                unsigned int glyphStride,
                hb_position_t* firstAdvance,
                unsigned int advanceStride,
-               void* voidFontRef)
+               void* voidFontInfo)
     {
-        auto* fontRef = static_cast<CTFontRef> (voidFontRef);
+        auto* fontInfo = static_cast<CTFontAdvanceInfo*> (voidFontInfo);
 
         std::vector<CGGlyph> glyphs (count);
 
@@ -193,7 +205,7 @@ static auto getAdvancesFn()
 
         std::vector<CGSize> advances (count);
 
-        getAdvancesForGlyphs<orientation> (f, fontRef, glyphs, advances);
+        getAdvancesForGlyphs<orientation> (f, *fontInfo, glyphs, advances);
 
         for (auto [index, advance] : enumerate (advances))
             *addBytesToPointer (firstAdvance, advanceStride * index) = HbScale::juceToHb ((float) (orientation == kCTFontOrientationHorizontal ? advance.width : advance.height));
@@ -212,29 +224,38 @@ static auto getAdvancesFn()
     This might need a bit of testing to make sure that it correctly handles advances for
     custom (non-Apple?) fonts.
 
-    @param hb       a hb_font_t to update with Apple-specific advances
-    @param fontRef  the CTFontRef (normally with a custom point size) that will be queried when computing advances
+    @param hb                   a hb_font_t to update with Apple-specific advances
+    @param fontRef              the CTFontRef (normally with a custom point size) that will be queried when computing advances
+    @param expectedPointSize    the point size that was requested when creating/copying the font.
+                                This is used instead of CTFontGetSize() because CTFontGetSize may
+                                not return the expected value after applying font variations.
 */
-static void overrideCTFontAdvances (hb_font_t* hb, CTFontRef fontRef)
+static void overrideCTFontAdvances (hb_font_t* hb, CTFontRef fontRef, CGFloat expectedPointSize)
 {
     HbFontFuncs funcs { hb_font_funcs_create(), IncrementRef::no };
 
-    // We pass the CTFontRef as user data to each of these functions.
+    // Allocate a CTFontAdvanceInfo struct to hold the font and expected size.
+    // This will be freed when HarfBuzz calls our destructor callback.
+    auto* fontInfo = new CTFontAdvanceInfo { fontRef, expectedPointSize };
+
+    // We pass the CTFontAdvanceInfo as user data to each of these functions.
     // We don't pass a custom destructor for the user data, as that will be handled by the custom
     // destructor for the hb_font_funcs_t.
-    hb_font_funcs_set_glyph_h_advance_func  (funcs.get(), getAdvanceFn <kCTFontOrientationHorizontal>(), (void*) fontRef, nullptr);
-    hb_font_funcs_set_glyph_v_advance_func  (funcs.get(), getAdvanceFn <kCTFontOrientationVertical>(),   (void*) fontRef, nullptr);
-    hb_font_funcs_set_glyph_h_advances_func (funcs.get(), getAdvancesFn<kCTFontOrientationHorizontal>(), (void*) fontRef, nullptr);
-    hb_font_funcs_set_glyph_v_advances_func (funcs.get(), getAdvancesFn<kCTFontOrientationVertical>(),   (void*) fontRef, nullptr);
+    hb_font_funcs_set_glyph_h_advance_func  (funcs.get(), getAdvanceFn <kCTFontOrientationHorizontal>(), fontInfo, nullptr);
+    hb_font_funcs_set_glyph_v_advance_func  (funcs.get(), getAdvanceFn <kCTFontOrientationVertical>(),   fontInfo, nullptr);
+    hb_font_funcs_set_glyph_h_advances_func (funcs.get(), getAdvancesFn<kCTFontOrientationHorizontal>(), fontInfo, nullptr);
+    hb_font_funcs_set_glyph_v_advances_func (funcs.get(), getAdvancesFn<kCTFontOrientationVertical>(),   fontInfo, nullptr);
 
     // We want to keep a copy of the font around so that all of our custom callbacks can query it,
     // so retain it here and release it once the custom functions are no longer in use.
     jassert (fontRef != nullptr);
     CFRetain (fontRef);
 
-    hb_font_set_funcs (hb, funcs.get(), (void*) fontRef, [] (void* ptr)
+    hb_font_set_funcs (hb, funcs.get(), fontInfo, [] (void* ptr)
     {
-        CFRelease ((CTFontRef) ptr);
+        auto* info = static_cast<CTFontAdvanceInfo*> (ptr);
+        CFRelease (info->font);
+        delete info;
     });
 }
 #endif
@@ -268,6 +289,13 @@ struct TypefaceNativeOptions
     TypefaceAscentDescent metrics;
     TypefaceFallbackColourGlyphSupport* colourGlyphSupport{};
 };
+
+#if JUCE_MAC || JUCE_IOS
+// Forward declaration for CoreText variation support
+static CFUniquePtr<CTFontRef> createCTFontWithVariations (CTFontRef baseCTFont,
+                                                           Span<const FontVariationSetting> variations,
+                                                           float pointSize);
+#endif
 
 class Typeface::Native
 {
@@ -311,16 +339,62 @@ public:
 
     HbFont getFontAtPointSizeAndScale (float points, float horizontalScale) const
     {
-        return subFontCache.get ({ points, horizontalScale }, [this] (auto args)
+        return getFontAtPointSizeScaleAndVariations (points, horizontalScale, {});
+    }
+
+    HbFont getFontAtPointSizeScaleAndVariations (float points,
+                                                 float horizontalScale,
+                                                 Span<const FontVariationSetting> variations) const
+    {
+        // Convert variations to a simpler form for cache key (just tag and value)
+        std::vector<std::pair<uint32, float>> variationKey;
+        variationKey.reserve (variations.size());
+        for (const auto& v : variations)
+            variationKey.emplace_back (v.tag.getTag(), v.value);
+
+        return subFontCache.get ({ points, horizontalScale, std::move (variationKey) }, [this, &variations] (auto args)
         {
-            const auto [p, h] = args;
+            const auto& [p, h, vars] = args;
             HbFont subFont { hb_font_create_sub_font (getFont()), IncrementRef::no };
 
             hb_font_set_ptem (subFont.get(), p);
             hb_font_set_scale (subFont.get(), HbScale::juceToHb (p * h), HbScale::juceToHb (p));
 
+            // Apply variations if any
+            if (! variations.empty())
+            {
+                std::vector<hb_variation_t> hbVariations;
+                hbVariations.reserve (variations.size());
+
+                for (const auto& var : variations)
+                    hbVariations.push_back ({ var.tag.getTag(), var.value });
+
+                hb_font_set_variations (subFont.get(),
+                                        hbVariations.data(),
+                                        (unsigned int) hbVariations.size());
+            }
+
            #if JUCE_MAC || JUCE_IOS
-            overrideCTFontAdvances (subFont.get(), hb_coretext_font_get_ct_font (subFont.get()));
+            // On macOS, if variations were applied, we need to create a CTFont with those variations
+            // and use it for advance calculations, because hb_font_set_variations doesn't update
+            // the internal CTFont that HarfBuzz uses for metrics.
+            CTFontRef ctFontForAdvances = hb_coretext_font_get_ct_font (subFont.get());
+
+            // Get the base font size (typically 1pt from HarfBuzz). We create any varied font
+            // at this same size so the scaling math works identically with or without variations.
+            const CGFloat baseFontSize = CTFontGetSize (ctFontForAdvances);
+
+            CFUniquePtr<CTFontRef> variedCTFont;
+            if (! variations.empty() && ctFontForAdvances != nullptr)
+            {
+                // Create the varied font at the SAME size as the base font (typically 1pt).
+                // This ensures the scale adjustment calculation works correctly.
+                variedCTFont = createCTFontWithVariations (ctFontForAdvances, variations, (float) baseFontSize);
+                if (variedCTFont != nullptr)
+                    ctFontForAdvances = variedCTFont.get();
+            }
+
+            overrideCTFontAdvances (subFont.get(), ctFontForAdvances, baseFontSize);
            #endif
 
             return subFont;
@@ -356,7 +430,9 @@ private:
         return result;
     });
     TypefaceFallbackColourGlyphSupport* colourGlyphSupport;
-    mutable LruCache<std::tuple<float, float>, HbFont> subFontCache;
+    // Cache key includes point size, horizontal scale, and variation settings (tag + value pairs)
+    using SubFontCacheKey = std::tuple<float, float, std::vector<std::pair<uint32, float>>>;
+    mutable LruCache<SubFontCacheKey, HbFont> subFontCache;
     mutable LruCache<hb_codepoint_t, std::optional<hb_glyph_extents_t>, 512> glyphExtentsCache;
 };
 
@@ -520,9 +596,181 @@ static HbDrawFuncs getPathDrawFuncs()
     return result;
 }
 
+#if JUCE_MAC || JUCE_IOS
+static Path getGlyphPathFromCoreText (CTFontRef ctFont, int glyphNumber, float scale)
+{
+    Path result;
+
+    // Create path from CTFont
+    // Note: We apply positive scale for both x and y (no Y-flip here)
+    // The Y-flip will be applied later by the caller with AffineTransform::scale(scale, -scale)
+    CGGlyph glyph = (CGGlyph) glyphNumber;
+    CGAffineTransform transform = CGAffineTransformMakeScale (scale, scale);
+    CFUniquePtr<CGPathRef> cgPath { CTFontCreatePathForGlyph (ctFont, glyph, &transform) };
+
+    if (cgPath == nullptr)
+        return result;
+
+    // Convert CGPath to JUCE Path using CGPathApply
+    struct PathBuilder
+    {
+        Path* path;
+
+        static void applyElement (void* info, const CGPathElement* element)
+        {
+            auto* builder = static_cast<PathBuilder*> (info);
+            auto& path = *builder->path;
+
+            switch (element->type)
+            {
+                case kCGPathElementMoveToPoint:
+                    path.startNewSubPath ({ (float) element->points[0].x, (float) element->points[0].y });
+                    break;
+
+                case kCGPathElementAddLineToPoint:
+                    path.lineTo ({ (float) element->points[0].x, (float) element->points[0].y });
+                    break;
+
+                case kCGPathElementAddQuadCurveToPoint:
+                    path.quadraticTo ({ (float) element->points[0].x, (float) element->points[0].y },
+                                     { (float) element->points[1].x, (float) element->points[1].y });
+                    break;
+
+                case kCGPathElementAddCurveToPoint:
+                    path.cubicTo ({ (float) element->points[0].x, (float) element->points[0].y },
+                                 { (float) element->points[1].x, (float) element->points[1].y },
+                                 { (float) element->points[2].x, (float) element->points[2].y });
+                    break;
+
+                case kCGPathElementCloseSubpath:
+                    path.closeSubPath();
+                    break;
+            }
+        }
+    };
+
+    PathBuilder builder { &result };
+    CGPathApply (cgPath.get(), &builder, PathBuilder::applyElement);
+
+    return result;
+}
+
+static CFUniquePtr<CTFontRef> createCTFontWithVariations (CTFontRef baseCTFont,
+                                                           Span<const FontVariationSetting> variations,
+                                                           float pointSize)
+{
+    if (variations.empty())
+        return {};
+
+    // Build variation dictionary
+    CFMutableDictionaryRef variationDict = CFDictionaryCreateMutable (kCFAllocatorDefault,
+                                                                       (CFIndex) variations.size(),
+                                                                       &kCFTypeDictionaryKeyCallBacks,
+                                                                       &kCFTypeDictionaryValueCallBacks);
+
+    for (const auto& var : variations)
+    {
+        auto axisTag = var.tag.getTag();
+        CFNumberRef key = CFNumberCreate (kCFAllocatorDefault, kCFNumberIntType, &axisTag);
+        CGFloat value = var.value;
+        CFNumberRef valueRef = CFNumberCreate (kCFAllocatorDefault, kCFNumberCGFloatType, &value);
+
+        CFDictionarySetValue (variationDict, key, valueRef);
+        CFRelease (key);
+        CFRelease (valueRef);
+    }
+
+    // Create descriptor with variations
+    const void* keys[] = { kCTFontVariationAttribute };
+    const void* values[] = { variationDict };
+    CFDictionaryRef attributes = CFDictionaryCreate (kCFAllocatorDefault,
+                                                      keys,
+                                                      values,
+                                                      1,
+                                                      &kCFTypeDictionaryKeyCallBacks,
+                                                      &kCFTypeDictionaryValueCallBacks);
+    CFRelease (variationDict);
+
+    CTFontDescriptorRef descriptor = CTFontDescriptorCreateWithAttributes (attributes);
+    CFRelease (attributes);
+
+    // Create new CTFont with variations at the specified point size
+    CTFontRef variedFont = CTFontCreateCopyWithAttributes (baseCTFont, (CGFloat) pointSize, nullptr, descriptor);
+    CFRelease (descriptor);
+
+    return CFUniquePtr<CTFontRef> { variedFont };
+}
+#endif
+
 void Typeface::getOutlineForGlyph (TypefaceMetricsKind kind, int glyphNumber, Path& path) const
 {
-    auto* font = getNativeDetails()->getFont();
+    getOutlineForGlyph (kind, glyphNumber, path, {});
+}
+
+void Typeface::getOutlineForGlyph (TypefaceMetricsKind kind,
+                                   int glyphNumber,
+                                   Path& path,
+                                   Span<const FontVariationSetting> variations) const
+{
+   #if JUCE_MAC || JUCE_IOS
+    // macOS: Use CoreText directly for variation-aware outline extraction
+    if (! variations.empty())
+    {
+        // Get base CTFont from HarfBuzz
+        auto* baseHbFont = getNativeDetails()->getFont();
+        auto* baseCTFont = hb_coretext_font_get_ct_font (baseHbFont);
+
+        if (baseCTFont != nullptr)
+        {
+            // Create CTFont with variations at 1pt for outline extraction
+            // (we'll scale the path ourselves later)
+            auto variedCTFont = createCTFontWithVariations (baseCTFont, variations, 1.0f);
+
+            if (variedCTFont != nullptr)
+            {
+                // Calculate scale factor to match HarfBuzz behavior
+                // HarfBuzz uses: scale = font->x_scale / CTFontGetSize
+                // We must use the base font's actual scale, not a fixed value
+                int baseXScale, baseYScale;
+                hb_font_get_scale (baseHbFont, &baseXScale, &baseYScale);
+
+                CGFloat ctFontSize = CTFontGetSize (variedCTFont.get());
+                const float ctScale = (float) baseXScale / (float) ctFontSize;
+
+                // Extract path using CoreText with the same scale as HarfBuzz would use
+                path = getGlyphPathFromCoreText (variedCTFont.get(), glyphNumber, ctScale);
+
+                // Now apply the JUCE scale transform (with Y-flip), just like the HarfBuzz path does
+                const auto metrics = getNativeDetails()->getAscentDescent (kind);
+                const auto factor = metrics.getHeightToPointsFactor();
+                jassert (! std::isinf (factor));
+                const auto scale = factor / (float) hb_face_get_upem (hb_font_get_face (baseHbFont));
+
+                path.applyTransform (AffineTransform::scale (scale, -scale));
+                return;
+            }
+        }
+
+        // Fallback if CoreText variation creation failed
+    }
+   #endif
+
+    // Standard path for no variations or non-macOS platforms
+    hb_font_t* font;
+    HbFont variantFont;
+
+    if (variations.empty())
+    {
+        font = getNativeDetails()->getFont();
+    }
+    else
+    {
+        // Create a font with variations applied
+        // Use 1pt size since we'll scale the result anyway
+        variantFont = getNativeDetails()->getFontAtPointSizeScaleAndVariations (1.0f, 1.0f, variations);
+        font = variantFont.get();
+    }
+
     const auto metrics = getNativeDetails()->getAscentDescent (kind);
     const auto factor = metrics.getHeightToPointsFactor();
     jassert (! std::isinf (factor));
@@ -870,6 +1118,135 @@ std::vector<FontFeatureTag> Typeface::getSupportedFeatures() const
     features.erase (std::unique (features.begin(), features.end()), features.end());
 
     return features;
+}
+
+bool Typeface::isVariableFont() const
+{
+    auto* face = hb_font_get_face (getNativeDetails()->getFont());
+    return hb_ot_var_has_data (face) != 0;
+}
+
+std::vector<FontVariationSetting> Typeface::getVariationAxes() const
+{
+    auto* face = hb_font_get_face (getNativeDetails()->getFont());
+    const auto axisCount = hb_ot_var_get_axis_count (face);
+
+    if (axisCount == 0)
+        return {};
+
+    std::vector<hb_ot_var_axis_info_t> axisInfos (axisCount);
+    unsigned int count = axisCount;
+    hb_ot_var_get_axis_infos (face, 0, &count, axisInfos.data());
+
+    std::vector<FontVariationSetting> result;
+    result.reserve (count);
+
+    for (unsigned int i = 0; i < count; ++i)
+    {
+        const auto& info = axisInfos[i];
+        result.push_back (FontVariationSetting {
+            FontVariationTag { info.tag },
+            info.default_value,
+            info.min_value,
+            info.max_value,
+            info.default_value
+        });
+    }
+
+    return result;
+}
+
+static String getNameFromHarfBuzz (hb_face_t* face, hb_ot_name_id_t nameId)
+{
+    // Try with HB_LANGUAGE_INVALID first (should default to English)
+    unsigned int textSize = 0;
+    hb_language_t foundLanguage = HB_LANGUAGE_INVALID;
+
+    hb_ot_name_get_utf8 (face, nameId, HB_LANGUAGE_INVALID, &textSize, nullptr);
+
+    // If that didn't work, try with explicit English language
+    if (textSize == 0)
+    {
+        foundLanguage = hb_language_from_string ("en", -1);
+        hb_ot_name_get_utf8 (face, nameId, foundLanguage, &textSize, nullptr);
+    }
+
+    // If still no result, try to find any available name for this nameId
+    if (textSize == 0)
+    {
+        unsigned int numEntries = 0;
+        const auto* entries = hb_ot_name_list_names (face, &numEntries);
+
+        for (unsigned int i = 0; i < numEntries; ++i)
+        {
+            if (entries[i].name_id == nameId)
+            {
+                foundLanguage = entries[i].language;
+                hb_ot_name_get_utf8 (face, nameId, foundLanguage, &textSize, nullptr);
+                if (textSize > 0)
+                    break;
+            }
+        }
+    }
+
+    if (textSize == 0)
+        return {};
+
+    std::vector<char> buffer (textSize + 1);
+    unsigned int bufferSize = (unsigned int) buffer.size();
+    hb_ot_name_get_utf8 (face, nameId, foundLanguage, &bufferSize, buffer.data());
+
+    return String::fromUTF8 (buffer.data(), (int) bufferSize);
+}
+
+std::vector<FontVariationNamedInstance> Typeface::getVariationNamedInstances() const
+{
+    auto* face = hb_font_get_face (getNativeDetails()->getFont());
+    const auto instanceCount = hb_ot_var_get_named_instance_count (face);
+
+    if (instanceCount == 0)
+        return {};
+
+    const auto axisCount = hb_ot_var_get_axis_count (face);
+
+    // Get axis info for all axes (needed to populate min/max/default)
+    std::vector<hb_ot_var_axis_info_t> axisInfos (axisCount);
+    unsigned int infoCount = axisCount;
+    hb_ot_var_get_axis_infos (face, 0, &infoCount, axisInfos.data());
+
+    std::vector<FontVariationNamedInstance> result;
+    result.reserve (instanceCount);
+
+    for (unsigned int i = 0; i < instanceCount; ++i)
+    {
+        FontVariationNamedInstance instance;
+
+        // Get the name
+        const auto nameId = hb_ot_var_named_instance_get_subfamily_name_id (face, i);
+        instance.name = getNameFromHarfBuzz (face, nameId);
+
+        // Get the design coordinates for this instance
+        std::vector<float> coords (axisCount);
+        unsigned int coordCount = axisCount;
+        hb_ot_var_named_instance_get_design_coords (face, i, &coordCount, coords.data());
+
+        // Build settings from coords and axis info
+        for (unsigned int j = 0; j < coordCount && j < infoCount; ++j)
+        {
+            const auto& info = axisInfos[j];
+            instance.settings.push_back (FontVariationSetting {
+                FontVariationTag { info.tag },
+                coords[j],
+                info.min_value,
+                info.max_value,
+                info.default_value
+            });
+        }
+
+        result.push_back (std::move (instance));
+    }
+
+    return result;
 }
 
 //==============================================================================

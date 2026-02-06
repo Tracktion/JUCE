@@ -65,6 +65,7 @@
 #if ! (JUCE_LINUX || JUCE_BSD)
  #include "../../../GUI/VideoDemo.h"
 #endif
+#include "../../../GUI/FontVariationsDemo.h"
 #include "../../../GUI/WebBrowserDemo.h"
 #include "../../../GUI/WidgetsDemo.h"
 #include "../../../GUI/WindowsDemo.h"
@@ -90,6 +91,7 @@ void registerDemos_Two() noexcept
     REGISTER_DEMO (FlexBoxDemo,               GUI, false)
     REGISTER_DEMO (FontsDemo,                 GUI, false)
     REGISTER_DEMO (FontFeaturesDemo,          GUI, false)
+    REGISTER_DEMO (FontVariationsDemo,        GUI, false)
     REGISTER_DEMO (GraphicsDemo,              GUI, false)
     REGISTER_DEMO (GridDemo,                  GUI, false)
     REGISTER_DEMO (ImagesDemo,                GUI, false)

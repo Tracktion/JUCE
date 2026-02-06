@@ -193,6 +193,34 @@ public:
     /** Returns a copy of these options with the specified feature disabled. */
     [[nodiscard]] FontOptions withFeatureDisabled (FontFeatureTag tag) const { return withFeatureSetting ({ tag, FontFeatureSetting::featureDisabled }); }
 
+    /** Returns a copy of these options with the specified variation setting added or updated.
+
+        Variable fonts support design-variation axes like weight, width, and optical size.
+        Use this method to set specific axis values for the font.
+
+        @see FontVariationSetting, Typeface::getVariationAxes()
+    */
+    [[nodiscard]] FontOptions withVariationSetting (FontVariationSetting variationSetting) const;
+
+    /** Returns a copy of these options with the specified variation axis removed.
+
+        After removal, the axis will use the font's default value for that axis.
+    */
+    [[nodiscard]] FontOptions withVariationRemoved (FontVariationTag variationTag) const;
+
+    /** Returns a copy of these options configured for a named instance.
+
+        Variable fonts can define preset combinations of axis values with names
+        like "Bold", "Light", "Condensed", etc. This method applies all the
+        variation settings from the named instance.
+
+        The settings from the named instance will replace any existing variation
+        settings for the same axes.
+
+        @see FontVariationNamedInstance, Typeface::getVariationNamedInstances()
+    */
+    [[nodiscard]] FontOptions withNamedInstance (const FontVariationNamedInstance& instance) const;
+
     /** @see withName() */
     [[nodiscard]] auto getName()             const { return name; }
     /** @see withStyle() */
@@ -224,6 +252,10 @@ public:
     [[nodiscard]] Span<const FontFeatureSetting> getFeatureSettings() const&  { return features; }
     [[nodiscard]] Span<const FontFeatureSetting> getFeatureSettings() const&& = delete;
 
+    /** @see withVariationSetting() */
+    [[nodiscard]] Span<const FontVariationSetting> getVariationSettings() const&  { return variations; }
+    [[nodiscard]] Span<const FontVariationSetting> getVariationSettings() const&& = delete;
+
     /** Equality operator. */
     [[nodiscard]] bool operator== (const FontOptions& other) const;
     /** Inequality operator. */
@@ -244,6 +276,7 @@ private:
     Typeface::Ptr typeface;
     std::vector<String> fallbacks;
     std::vector<FontFeatureSetting> features;
+    std::vector<FontVariationSetting> variations;
     TypefaceMetricsKind metricsKind { TypefaceMetricsKind::portable };
     float height = -1.0f;
     float pointHeight = -1.0f;

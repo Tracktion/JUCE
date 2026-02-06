@@ -417,6 +417,40 @@ public:
     void removeFeatureSetting (FontFeatureTag featureToRemove);
 
     //==============================================================================
+    /** Returns the current variation axis settings for this font.
+
+        Variable fonts support design-variation axes like weight, width, and optical size.
+        This returns the current settings that have been applied to this font.
+
+        Use Typeface::isVariableFont() to check if a font supports variations, and
+        Typeface::getVariationAxes() to query available axes and their ranges.
+
+        @see setVariationSetting, removeVariationSetting, Typeface::getVariationAxes
+    */
+    Span<const FontVariationSetting> getVariationSettings() const&;
+    Span<const FontVariationSetting> getVariationSettings() const&& = delete;
+
+    /** Sets a variation axis value for this font.
+
+        Variable fonts support design-variation axes like weight, width, and optical size.
+        Use this method to set specific axis values.
+
+        Use Typeface::isVariableFont() to check if a font supports variations, and
+        Typeface::getVariationAxes() to query available axes and their ranges.
+
+        @see getVariationSettings, removeVariationSetting, Typeface::getVariationAxes
+    */
+    void setVariationSetting (FontVariationSetting variationSetting);
+
+    /** Removes a variation axis setting from this font.
+
+        After removal, the axis will use the font's default value for that axis.
+
+        @see getVariationSettings, setVariationSetting
+    */
+    void removeVariationSetting (FontVariationTag variationToRemove);
+
+    //==============================================================================
     /** Returns the font's horizontal scale.
         A value of 1.0 is the normal scale, less than this will be narrower, greater
         than 1.0 will be stretched out.
