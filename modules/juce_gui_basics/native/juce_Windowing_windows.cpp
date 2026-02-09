@@ -4690,9 +4690,12 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HWNDComponentPeer)
 };
 
+extern bool juce_isRunningInWine();
+
 ComponentPeer* Component::createNewPeer (int styleFlags, void* parentHWND)
 {
-    return new HWNDComponentPeer { *this, styleFlags, (HWND) parentHWND, false, 1 };
+    const auto renderer = juce_isRunningInWine() ? 0 : 1;
+    return new HWNDComponentPeer { *this, styleFlags, (HWND) parentHWND, false, renderer };
 }
 
 Image createSnapshotOfNativeWindow (void* nativeWindowHandle)
