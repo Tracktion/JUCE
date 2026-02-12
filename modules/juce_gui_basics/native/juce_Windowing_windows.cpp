@@ -534,48 +534,10 @@ ScopedDPIAwarenessDisabler::~ScopedDPIAwarenessDisabler()
 }
 
 //==============================================================================
-using SettingChangeCallbackFunc = void (*)(void);
+using SettingChangeCallbackFunc = void (*) (void);
 extern SettingChangeCallbackFunc settingChangeCallback;
 
 //==============================================================================
-static const Displays::Display* getCurrentDisplayFromScaleFactor (HWND hwnd);
-
-template <typename ValueType>
-static Rectangle<ValueType> convertPhysicalScreenRectangleToLogical (Rectangle<ValueType> r, HWND h) noexcept
-{
-    if (isPerMonitorDPIAwareWindow (h))
-        return Desktop::getInstance().getDisplays().physicalToLogical (r, getCurrentDisplayFromScaleFactor (h));
-
-    return r;
-}
-
-template <typename ValueType>
-static Rectangle<ValueType> convertLogicalScreenRectangleToPhysical (Rectangle<ValueType> r, HWND h) noexcept
-{
-    if (isPerMonitorDPIAwareWindow (h))
-        return Desktop::getInstance().getDisplays().logicalToPhysical (r, getCurrentDisplayFromScaleFactor (h));
-
-    return r;
-}
-
-template <typename ValueType>
-static Point<ValueType> convertPhysicalScreenPointToLogical (Point<ValueType> p, HWND h) noexcept
-{
-    if (isPerMonitorDPIAwareWindow (h))
-        return Desktop::getInstance().getDisplays().physicalToLogical (p, getCurrentDisplayFromScaleFactor (h));
-
-    return p;
-}
-
-template <typename ValueType>
-static Point<ValueType> convertLogicalScreenPointToPhysical (Point<ValueType> p, HWND h) noexcept
-{
-    if (isPerMonitorDPIAwareWindow (h))
-        return Desktop::getInstance().getDisplays().logicalToPhysical (p, getCurrentDisplayFromScaleFactor (h));
-
-    return p;
-}
-
 static double getScaleFactorForWindow (HWND h)
 {
     return (double) GetDpiForWindow (h) / USER_DEFAULT_SCREEN_DPI;
@@ -1415,26 +1377,32 @@ public:
 
     void setBounds (const Rectangle<int>& bounds, bool isNowFullScreen) override
     {
+        // If we try to set new bounds while handling an existing position change,
+        // Windows may get confused about our current scale and size.
+        // This can happen when moving a window between displays, because the mouse-move
+        // generator in handlePositionChanged can cause the window to move again.
+        if (inHandlePositionChanged)
+            return;
+
+        if (isNowFullScreen != isFullScreen())
+            setFullScreen (isNowFullScreen);
+
+        if (isNowFullScreen)
+            return;
+
         setBoundsPhysical (std::invoke ([&]
         {
             ScopedThreadDPIAwarenessSetter setter { hwnd };
-
-            if (! isPerMonitorDPIAwareWindow (hwnd))
-                return bounds;
-
-            if (inDpiChange)
-                return convertLogicalScreenRectangleToPhysical (bounds, hwnd);
-
-            if (GetParent (hwnd) != nullptr)
-                return (bounds.toDouble() * getPlatformScaleFactor()).toNearestInt();
-
-            return convertLogicalScreenRectangleToPhysical (bounds, hwnd)
-                    .withPosition (Desktop::getInstance().getDisplays().logicalToPhysical (bounds.getTopLeft()));
-        }), isNowFullScreen);
+            using SH = detail::ScalingHelpers;
+            const auto pos = SH::convertLogicalScreenPointToPhysical (bounds.getPosition().toFloat());
+            return (bounds.toFloat() * getPlatformScaleFactor()).withPosition (pos).toNearestInt();
+        }));
     }
 
     Rectangle<int> getBounds() const override
     {
+        using SH = detail::ScalingHelpers;
+
         if (parentToAddTo == nullptr)
         {
             if (hasTitleBar())
@@ -1447,16 +1415,19 @@ public:
                 // window border, but this is preferable to displaying an uninitialised/unpainted
                 // region of the client area.
                 const auto physicalBorder = findPhysicalBorderSize().value_or (BorderSize<int>{});
-
                 const auto physicalBounds = D2DUtilities::toRectangle (getWindowScreenRect (hwnd));
                 const auto physicalClient = physicalBorder.subtractedFrom (physicalBounds);
-                const auto logicalClient = convertPhysicalScreenRectangleToLogical (physicalClient.toFloat(), hwnd);
-                const auto snapped = logicalClient.withPosition (logicalClient.getPosition().roundToInt().toFloat()).getSmallestIntegerContainer();
+                const auto logicalPosition = SH::convertPhysicalScreenPointToLogical (physicalBounds.getPosition().toFloat());
+                const auto logicalClient = physicalClient.toFloat() / getPlatformScaleFactor();
+                const auto snapped = logicalClient.withPosition (logicalPosition).getSmallestIntegerContainer();
                 return snapped;
             }
 
-            const auto logicalClient = convertPhysicalScreenRectangleToLogical (getClientRectInScreen(), hwnd);
-            return logicalClient;
+            const auto physicalClient = getClientRectInScreen().toFloat();
+            const auto logicalPosition = SH::convertPhysicalScreenPointToLogical (physicalClient.getPosition().toFloat());
+            const auto logicalClient = physicalClient / getPlatformScaleFactor();
+            const auto snapped = logicalClient.withPosition (logicalPosition).toNearestInt();
+            return snapped;
         }
 
         auto localBounds = D2DUtilities::toRectangle (getWindowClientRect (hwnd));
@@ -1467,23 +1438,30 @@ public:
         return localBounds;
     }
 
-    Point<int> getScreenPosition() const
+    Point<float> localToMultimonitor (Point<float> x) override
     {
-        return convertPhysicalScreenPointToLogical (getClientRectInScreen().getPosition(), hwnd);
+        const auto localPhysical = x * getPlatformScaleFactor();
+        const auto physical = localPhysical + getClientRectInScreen().getPosition().toFloat();
+        return physical;
+    }
+
+    Point<float> multimonitorToLocal (Point<float> x) override
+    {
+        const auto localPhysical = x - getClientRectInScreen().getPosition().toFloat();
+        const auto local = localPhysical / getPlatformScaleFactor();
+        return local;
     }
 
     Point<float> localToGlobal (Point<float> relativePosition) override
     {
-        const auto localPhysical = relativePosition * getPlatformScaleFactor();
-        const auto physical = localPhysical + getClientRectInScreen().getPosition().toFloat();
-        return convertPhysicalScreenPointToLogical (physical, hwnd);
+        const auto multimonitor = localToMultimonitor (relativePosition);
+        return detail::ScalingHelpers::convertPhysicalScreenPointToLogical (multimonitor);
     }
 
     Point<float> globalToLocal (Point<float> screenPosition) override
     {
-        const auto physical = convertLogicalScreenPointToPhysical (screenPosition, hwnd);
-        const auto localPhysical = physical - getClientRectInScreen().getPosition().toFloat();
-        return localPhysical / getPlatformScaleFactor();
+        const auto physical = detail::ScalingHelpers::convertLogicalScreenPointToPhysical (screenPosition);
+        return multimonitorToLocal (physical);
     }
 
     using ComponentPeer::localToGlobal;
@@ -1853,8 +1831,8 @@ public:
         Point<float> getMousePos (POINTL mousePos) const
         {
             const auto originalPos = D2DUtilities::toPoint ({ mousePos.x, mousePos.y });
-            const auto logicalPos = convertPhysicalScreenPointToLogical (originalPos, peer.hwnd);
-            return detail::ScalingHelpers::screenPosToLocalPos (peer.component, logicalPos.toFloat());
+            const auto logicalPos = detail::ScalingHelpers::convertPhysicalScreenPointToLogical (originalPos.toFloat());
+            return detail::ScalingHelpers::screenPosToLocalPos (peer.component, logicalPos);
         }
 
         struct DroppedData
@@ -2756,7 +2734,10 @@ private:
         if (peer == nullptr)
             peer = this;
 
-        return std::tuple (peer, peer->globalToLocal (convertPhysicalScreenPointToLogical (D2DUtilities::toPoint (currentMousePos), hwnd).toFloat()));
+        using SH = detail::ScalingHelpers;
+        const auto physical = D2DUtilities::toPoint (currentMousePos).toFloat();
+        const auto logical = SH::convertPhysicalScreenPointToLogical (physical);
+        return std::tuple (peer, peer->globalToLocal (logical));
     }
 
     static MouseInputSource::InputSourceType getPointerType (WPARAM wParam)
@@ -2865,10 +2846,11 @@ private:
     {
         auto isCancel = false;
 
+        using SH = detail::ScalingHelpers;
+
         const auto touchIndex = currentTouches.getIndexOfTouch (this, touch.dwID);
         const auto time = getMouseEventTime();
-        const auto pos = globalToLocal (convertPhysicalScreenPointToLogical (D2DUtilities::toPoint ({ roundToInt (touch.x / 100.0f),
-                                                                                                      roundToInt (touch.y / 100.0f) }), hwnd).toFloat());
+        const auto pos = globalToLocal (SH::convertPhysicalScreenPointToLogical ({ (float) touch.x / 100.0f, (float) touch.y / 100.0f }));
         const auto pressure = touchPressure;
         auto modsToSend = ModifierKeys::getCurrentModifiers();
 
@@ -2954,8 +2936,11 @@ private:
 
             const auto pressure = (penInfo.penMask & PEN_MASK_PRESSURE) ? (float) penInfo.pressure / 1024.0f : MouseInputSource::defaultPressure;
 
-            if (! handlePenInput (penInfo, globalToLocal (convertPhysicalScreenPointToLogical (D2DUtilities::toPoint (getPOINTFromLParam (lParam)), hwnd).toFloat()),
-                                  pressure, isDown, isUp))
+            using SH = detail::ScalingHelpers;
+            const auto physical = D2DUtilities::toPoint (getPOINTFromLParam (lParam)).toFloat();
+            const auto logical = SH::convertPhysicalScreenPointToLogical (physical);
+
+            if (! handlePenInput (penInfo, globalToLocal (logical), pressure, isDown, isUp))
                 return false;
         }
         else
@@ -3304,6 +3289,8 @@ private:
         if (! physicalBorder.has_value())
             return {};
 
+        using SH = detail::ScalingHelpers;
+
         const auto logicalBorder = getFrameSize();
 
         // The constrainer expects to operate in logical coordinate space.
@@ -3316,9 +3303,9 @@ private:
         // borders with physical.
         const auto requestedPhysicalBounds = proposed;
         const auto requestedPhysicalClient = physicalBorder->subtractedFrom (requestedPhysicalBounds);
-        const auto requestedLogicalClient = detail::ScalingHelpers::unscaledScreenPosToScaled (
+        const auto requestedLogicalClient = SH::unscaledScreenPosToScaled (
                 component,
-                convertPhysicalScreenRectangleToLogical (requestedPhysicalClient, hwnd));
+                (requestedPhysicalClient.toFloat() / getPlatformScaleFactor()).toNearestInt());
         const auto requestedLogicalBounds = logicalBorder.addedTo (requestedLogicalClient);
 
         const auto originalLogicalBounds = logicalBorder.addedTo (component.getBounds());
@@ -3334,9 +3321,8 @@ private:
                                   right);
 
         const auto modifiedLogicalClient = logicalBorder.subtractedFrom (modifiedLogicalBounds);
-        const auto modifiedPhysicalClient = convertLogicalScreenRectangleToPhysical (
-                detail::ScalingHelpers::scaledScreenPosToUnscaled (component, modifiedLogicalClient).toFloat(),
-                hwnd);
+        const auto unscaledClient = SH::scaledScreenPosToUnscaled (component, modifiedLogicalClient);
+        const auto modifiedPhysicalClient = unscaledClient.toFloat() * getPlatformScaleFactor();
 
         const auto closestIntegralSize = modifiedPhysicalClient
                 .withPosition (requestedPhysicalClient.getPosition().toFloat())
@@ -3611,29 +3597,20 @@ private:
     Point<float> getLocalPointFromScreenLParam (LPARAM lParam)
     {
         const auto globalPos = D2DUtilities::toPoint (getPOINTFromLParam (lParam));
-        return globalToLocal (convertPhysicalScreenPointToLogical (globalPos, hwnd).toFloat());
+        return globalToLocal (detail::ScalingHelpers::convertPhysicalScreenPointToLogical (globalPos.toFloat()));
     }
 
     Point<float> getPointFromLocalLParam (LPARAM lParam) noexcept
     {
-        const auto p = D2DUtilities::toPoint (getPOINTFromLParam (lParam));
-
-        if (! isPerMonitorDPIAwareWindow (hwnd))
-            return p.toFloat();
-
-        // LPARAM is relative to this window's top-left but may be on a different monitor so we need to calculate the
-        // physical screen position and then convert this to local logical coordinates
-        auto r = getWindowScreenRect (hwnd);
-        const auto windowBorder = findPhysicalBorderSize().value_or (BorderSize<int>{});
-        const auto offset = p
-                          + Point { (int) r.left, (int) r.top }
-                          + Point { windowBorder.getLeft(), windowBorder.getTop() };
-        return globalToLocal (Desktop::getInstance().getDisplays().physicalToLogical (offset).toFloat());
+        // LPARAM should hold the cursor position relative to the top left of the client area
+        // in the format used by WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_LBUTTONUP, etc.
+        return D2DUtilities::toPoint (getPOINTFromLParam (lParam)).toFloat() / getPlatformScaleFactor();
     }
 
     Point<float> getCurrentMousePos() noexcept
     {
-        return globalToLocal (convertPhysicalScreenPointToLogical (D2DUtilities::toPoint (getPOINTFromLParam ((LPARAM) GetMessagePos())), hwnd).toFloat());
+        const auto physical = D2DUtilities::toPoint (getPOINTFromLParam ((LPARAM) GetMessagePos())).toFloat();
+        return globalToLocal (detail::ScalingHelpers::convertPhysicalScreenPointToLogical (physical));
     }
 
     static ModifierKeys getMouseModifiers()
@@ -3715,10 +3692,12 @@ private:
                         if (const auto result = DefWindowProc (h, message, wParam, lParam); HTSIZEFIRST <= result && result <= HTSIZELAST)
                             return result;
 
+                    using SH = detail::ScalingHelpers;
+
                     const auto physicalPoint = D2DUtilities::toPoint (getPOINTFromLParam (lParam));
-                    const auto logicalPoint = convertPhysicalScreenPointToLogical (physicalPoint, hwnd);
+                    const auto logicalPoint = SH::convertPhysicalScreenPointToLogical (physicalPoint.toFloat());
                     const auto localPoint = globalToLocal (logicalPoint.toFloat());
-                    const auto componentPoint = detail::ScalingHelpers::unscaledScreenPosToScaled (component, localPoint);
+                    const auto componentPoint = SH::unscaledScreenPosToScaled (component, localPoint);
 
                     const auto kind = component.findControlAtPoint (componentPoint);
 
@@ -4273,17 +4252,12 @@ private:
         return DefWindowProc (h, message, wParam, lParam);
     }
 
-    void setBoundsPhysical (const Rectangle<int>& bounds, bool isNowFullScreen)
+    void setBoundsPhysical (const Rectangle<int>& boundsIn)
     {
-        // If we try to set new bounds while handling an existing position change,
-        // Windows may get confused about our current scale and size.
-        // This can happen when moving a window between displays, because the mouse-move
-        // generator in handlePositionChanged can cause the window to move again.
         if (inHandlePositionChanged)
             return;
 
-        if (isNowFullScreen != isFullScreen())
-            setFullScreen (isNowFullScreen);
+        const auto bounds = boundsIn.withPosition (getMultimonitorPositionOverride().value_or (boundsIn.getPosition()));
 
         const ScopedValueSetter scope (shouldIgnoreModalDismiss, true);
 
@@ -4294,7 +4268,7 @@ private:
         {
             if (auto parentHwnd = GetParent (hwnd))
             {
-                const auto parentRect = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (getWindowScreenRect (parentHwnd)), hwnd);
+                const auto parentRect = (D2DUtilities::toRectangle (getWindowScreenRect (parentHwnd)).toFloat() / getPlatformScaleFactor()).toNearestInt();
                 newBounds += parentRect.getPosition();
             }
         }
@@ -4836,7 +4810,7 @@ private:
     {
         auto hwnd = peer.getHWND();
 
-        auto r = convertPhysicalScreenRectangleToLogical (D2DUtilities::toRectangle (getWindowScreenRect (hwnd)), hwnd);
+        auto r = (peer.getClientRectInScreen().toFloat() / peer.getPlatformScaleFactor()).toNearestInt();
         const auto w = r.getWidth();
         const auto h = r.getHeight();
 
@@ -5113,7 +5087,7 @@ public:
 
     void onVBlank() override
     {
-        if (peer.isSizing())
+        if (peer.isSizing() || std::exchange (schedulePaintOnVblank, false))
         {
             for (const auto& rect : deferredRepaints)
                 direct2DContext->addDeferredRepaint (rect);
@@ -5465,11 +5439,18 @@ private:
         //
         // Direct2DLowLevelGraphicsContext::endFrame calls ID2D1DeviceContext::EndDraw to finish painting
         // and then tells the swap chain to present the next swap chain back buffer.
-        if (auto* ctx = direct2DContext->startFrame ((float) peer.getPlatformScaleFactor()))
+
+        schedulePaintOnVblank = std::invoke ([&]
         {
-            peer.handlePaint (*ctx);
-            direct2DContext->endFrame();
-        }
+            if (auto* ctx = direct2DContext->startFrame ((float) peer.getPlatformScaleFactor()))
+            {
+                peer.handlePaint (*ctx);
+                direct2DContext->endFrame();
+                return false;
+            }
+
+            return true;
+        });
 
        #if JUCE_DIRECT2D_METRICS
         if (lastPaintStartTicks > 0)
@@ -5499,6 +5480,7 @@ private:
     std::unique_ptr<WrappedD2DHwndContextBase> direct2DContext = getContextForPeer (peer);
     UpdateRegion updateRegion;
     RectangleList<int> deferredRepaints;
+    bool schedulePaintOnVblank = false;
 
    #if JUCE_ETW_TRACELOGGING
     struct ETWEventProvider
@@ -5674,24 +5656,22 @@ Point<float> MouseInputSource::getCurrentRawMousePosition()
     POINT mousePos;
     GetCursorPos (&mousePos);
 
-    auto p = D2DUtilities::toPoint (mousePos);
+    const auto p = D2DUtilities::toPoint (mousePos).toFloat();
 
     if (isPerMonitorDPIAwareThread())
-        p = Desktop::getInstance().getDisplays().physicalToLogical (p);
+        return detail::ScalingHelpers::convertPhysicalScreenPointToLogical (p);
 
-    return p.toFloat();
+    return p;
 }
 
 void MouseInputSource::setRawMousePosition (Point<float> newPosition)
 {
-    auto newPositionInt = newPosition.roundToInt();
-
    #if JUCE_WIN_PER_MONITOR_DPI_AWARE
     if (isPerMonitorDPIAwareThread())
-        newPositionInt = Desktop::getInstance().getDisplays().logicalToPhysical (newPositionInt);
+        newPosition = detail::ScalingHelpers::convertLogicalScreenPointToPhysical (newPosition);
    #endif
 
-    auto point = D2DUtilities::toPOINT (newPositionInt);
+    const auto point = D2DUtilities::toPOINT (newPosition.roundToInt());
     SetCursorPos (point.x, point.y);
 }
 
@@ -5821,64 +5801,10 @@ void Desktop::setKioskComponent (Component* kioskModeComp, bool enableOrDisable,
     }
 
     if (kioskModeComp != nullptr && enableOrDisable)
-        kioskModeComp->setBounds (getDisplays().getDisplayForRect (kioskModeComp->getScreenBounds())->totalArea);
+        kioskModeComp->setBounds (getDisplays().getDisplayForRect (kioskModeComp->getScreenBounds())->logicalBounds.getSmallestIntegerContainer());
 }
 
 void Desktop::allowedOrientationsChanged() {}
-
-//==============================================================================
-static const Displays::Display* getCurrentDisplayFromScaleFactor (HWND hwnd)
-{
-    Array<const Displays::Display*> candidateDisplays;
-
-    const auto scaleToLookFor = [&]
-    {
-        if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
-            return peer->getPlatformScaleFactorWithoutOverride();
-
-        return getScaleFactorForWindow (hwnd);
-    }();
-
-    auto globalScale = Desktop::getInstance().getGlobalScaleFactor();
-
-    for (auto& d : Desktop::getInstance().getDisplays().displays)
-        if (approximatelyEqual (d.scale / globalScale, scaleToLookFor))
-            candidateDisplays.add (&d);
-
-    if (candidateDisplays.size() > 0)
-    {
-        if (candidateDisplays.size() == 1)
-            return candidateDisplays[0];
-
-        const auto bounds = [&]
-        {
-            if (auto* peer = HWNDComponentPeer::getOwnerOfWindow (hwnd))
-                return peer->getComponent().getTopLevelComponent()->getBounds();
-
-            return Desktop::getInstance().getDisplays().physicalToLogical (D2DUtilities::toRectangle (getWindowScreenRect (hwnd)));
-        }();
-
-        const Displays::Display* retVal = nullptr;
-        int maxArea = -1;
-
-        for (auto* d : candidateDisplays)
-        {
-            auto intersection = d->totalArea.getIntersection (bounds);
-            auto area = intersection.getWidth() * intersection.getHeight();
-
-            if (area > maxArea)
-            {
-                maxArea = area;
-                retVal = d;
-            }
-        }
-
-        if (retVal != nullptr)
-            return retVal;
-    }
-
-    return Desktop::getInstance().getDisplays().getPrimaryDisplay();
-}
 
 //==============================================================================
 struct MonitorInfo
@@ -5978,8 +5904,9 @@ void Displays::findDisplays (const Desktop& desktop)
             d.scale = (d.dpi / USER_DEFAULT_SCREEN_DPI) * (masterScale / Desktop::getDefaultMasterScale());
         }
 
-        d.totalArea = D2DUtilities::toRectangle (monitor.totalAreaRect);
-        d.userArea  = D2DUtilities::toRectangle (monitor.workAreaRect);
+        d.physicalBounds = D2DUtilities::toRectangle (monitor.totalAreaRect);
+        d.logicalBounds = d.physicalBounds.toFloat();
+        d.userBounds  = D2DUtilities::toRectangle (monitor.workAreaRect).toFloat();
 
         displays.add (d);
     }
@@ -5992,8 +5919,8 @@ void Displays::findDisplays (const Desktop& desktop)
     {
         for (auto& d : displays)
         {
-            d.totalArea /= masterScale;
-            d.userArea  /= masterScale;
+            d.logicalBounds /= masterScale;
+            d.userBounds    /= masterScale;
         }
     }
 }

@@ -771,10 +771,10 @@ void Displays::findDisplays (const Desktop& desktop)
 
                         BorderSize<double> result;
 
-                        if (rect.getY() == display->totalArea.getY())
+                        if (rect.getY() == display->logicalBounds.toNearestInt().getY())
                             result.setTop (rect.getHeight());
 
-                        if (rect.getBottom() == display->totalArea.getBottom())
+                        if (rect.getBottom() == display->logicalBounds.toNearestInt().getBottom())
                             result.setBottom (rect.getHeight());
 
                         return result;
@@ -812,8 +812,9 @@ void Displays::findDisplays (const Desktop& desktop)
 
         Display d;
         const auto masterScale = desktop.getGlobalScaleFactor();
-        d.totalArea = convertToRectInt ([s bounds]) / masterScale;
-        d.userArea = getRecommendedWindowBounds (desktop) / masterScale;
+        d.physicalBounds = convertToRectInt ([s bounds]) * s.nativeScale;
+        d.logicalBounds = convertToRectFloat ([s bounds]) / masterScale;
+        d.userBounds = getRecommendedWindowBounds (desktop).toFloat() / masterScale;
         d.safeAreaInsets = getSafeAreaInsets (desktop);
         const auto scaledInsets = keyboardChangeDetector.getInsets().multipliedBy (1.0 / (double) masterScale);
         d.keyboardInsets = detail::WindowingHelpers::roundToInt (scaledInsets);

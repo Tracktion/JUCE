@@ -575,17 +575,17 @@ JUCE_COMRESULT AccessibilityNativeHandle::ElementProviderFromPoint (double x, do
 {
     return withCheckedComArgs (pRetVal, *this, [&]
     {
-        auto* handler = [&]
+        auto* handler = std::invoke ([&]
         {
-            auto logicalScreenPoint = Desktop::getInstance().getDisplays()
-                                        .physicalToLogical (Point<int> (roundToInt (x),
-                                                                        roundToInt (y)));
+            const auto logicalScreenPoint = Desktop::getInstance().getDisplays()
+                                                                  .physicalToLogical (Point { x, y }.toFloat())
+                                                                  .roundToInt();
 
             if (auto* child = accessibilityHandler.getChildAt (logicalScreenPoint))
                 return child;
 
             return &accessibilityHandler;
-        }();
+        });
 
         handler->getNativeImplementation()->QueryInterface (IID_PPV_ARGS (pRetVal));
 

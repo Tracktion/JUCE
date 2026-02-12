@@ -115,21 +115,21 @@ void ComponentBoundsConstrainer::setBoundsForComponent (Component* component,
 
     auto bounds = targetBounds;
 
-    auto limits = [&]() -> Rectangle<int>
+    auto limits = std::invoke ([&]() -> Rectangle<int>
     {
         if (auto* parent = component->getParentComponent())
             return { parent->getWidth(), parent->getHeight() };
 
         const auto globalBounds = component->localAreaToGlobal (targetBounds - component->getPosition());
 
-        if (auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint (globalBounds.getCentre()))
-            return component->getLocalArea (nullptr, display->userArea) + component->getPosition();
+        if (auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint (globalBounds.toFloat().getCentre()))
+            return component->getLocalArea (nullptr, display->userBounds).toNearestInt() + component->getPosition();
 
         const auto max = std::numeric_limits<int>::max();
         return { max, max };
-    }();
+    });
 
-    auto border = [&]() -> BorderSize<int>
+    auto border = std::invoke ([&]() -> BorderSize<int>
     {
         if (component->getParentComponent() == nullptr)
             if (auto* peer = component->getPeer())
@@ -137,7 +137,7 @@ void ComponentBoundsConstrainer::setBoundsForComponent (Component* component,
                     return *frameSize;
 
         return {};
-    }();
+    });
 
     border.addTo (bounds);
 
