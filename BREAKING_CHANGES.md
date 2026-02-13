@@ -4,6 +4,51 @@
 
 ## Change
 
+The following member functions of Typeface have been removed:
+- Typeface::getStringWidth()
+- Typeface::getGlyphPositions()
+- Typeface::getEdgeTableForGlyph()
+- Typeface::applyVerticalHintingTransform()
+
+The following member functions of Font have been removed:
+- Font::getStringWidth()
+- Font::getStringWidthFloat()
+
+The signatures of the following functions have changed, removing the 
+TypefaceMetricsKind argument:
+- Typeface::getOutlineForGlyph()
+- Typeface::getGlyphBounds()
+- Typeface::getLayersForGlyph()
+
+**Possible Issues**
+
+Code that uses these functions will fail to compile.
+
+**Workaround**
+
+Use GlyphArrangement::getStringWidth() or TextLayout::getStringWidth() to find
+the width of a string taking font-fallback and shaping into account.
+
+To find individual glyph positions, lay out the string using GlyphArrangement
+or TextLayout, then use the positions provided by
+GlyphArrangement::PositionedGlyph and/or TextLayout::Glyph.
+
+Use getLayersForGlyph() instead of getEdgeTableForGlyph() when rendering
+individual glyphs.
+
+Where function signatures have changed, those functions now always normalise
+their results to a point size of 1.0. If necessary, you can use
+Typeface::getMetrics() to find the appropriate scale factor to convert to "JUCE
+height" using portable or legacy metrics.
+
+**Rationale**
+
+Removing deprecated functions simplifies the framework and reduces ongoing
+maintenance costs.
+
+
+## Change
+
 The overloads of Displays::logicalToPhysical and Displays::physicalToLogical
 that take a Point<int> have been deprecated.
 

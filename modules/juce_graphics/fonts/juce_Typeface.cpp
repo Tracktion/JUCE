@@ -520,49 +520,21 @@ static HbDrawFuncs getPathDrawFuncs()
     return result;
 }
 
-void Typeface::getOutlineForGlyph (TypefaceMetricsKind kind, int glyphNumber, Path& path) const
+void Typeface::getOutlineForGlyph (int glyphNumber, Path& path) const
 {
-    auto* font = getNativeDetails()->getFont();
-    const auto metrics = getNativeDetails()->getAscentDescent (kind);
-    const auto factor = metrics.getHeightToPointsFactor();
-    jassert (! std::isinf (factor));
-    const auto scale = factor / (float) hb_face_get_upem (hb_font_get_face (font));
-
-    // getTypefaceGlyph returns glyphs in em space, getOutlineForGlyph returns glyphs in "special JUCE units" space
-    path = getGlyphPathInGlyphUnits ((hb_codepoint_t) glyphNumber, font);
-    path.applyTransform (AffineTransform::scale (scale, -scale));
+    path = getGlyphPathInGlyphUnits ((hb_codepoint_t) glyphNumber, getNativeDetails()->getFont());
 }
 
-Rectangle<float> Typeface::getGlyphBounds (TypefaceMetricsKind kind, int glyphNumber) const
+Rectangle<float> Typeface::getGlyphBounds (int glyphNumber) const
 {
     const auto extents = getNativeDetails()->getGlyphExtents ((hb_codepoint_t) glyphNumber);
 
     if (! extents.has_value())
         return {};
 
-    auto* font = getNativeDetails()->getFont();
-    const auto metrics = getNativeDetails()->getAscentDescent (kind);
-    const auto factor = metrics.getHeightToPointsFactor();
-    jassert (! std::isinf (factor));
-    const auto scale = factor / (float) hb_face_get_upem (hb_font_get_face (font));
-
     return Rectangle { (float) extents->width, (float) extents->height }
             .withPosition ((float) extents->x_bearing, (float) extents->y_bearing)
-            .transformedBy (AffineTransform::scale (scale).scaled (1.0f, -1.0f));
-}
-
-void Typeface::applyVerticalHintingTransform (float, Path&)
-{
-    jassertfalse;
-}
-
-EdgeTable* Typeface::getEdgeTableForGlyph (TypefaceMetricsKind kind, int glyphNumber, const AffineTransform& transform, float)
-{
-    Path path;
-    getOutlineForGlyph (kind, glyphNumber, path);
-    path.applyTransform (transform);
-
-    return new EdgeTable (path.getBounds().getSmallestIntegerContainer().expanded (1, 0), std::move (path), {});
+            .transformedBy (AffineTransform::scale (1.0f, -1.0f));
 }
 
 static Colour makeColour (hb_color_t c)
@@ -646,15 +618,11 @@ static std::vector<GlyphLayer> getBitmapLayer (const Typeface& typeface, int gly
     return { GlyphLayer { ImageLayer { juceImage, transform } } };
 }
 
-std::vector<GlyphLayer> Typeface::getLayersForGlyph (TypefaceMetricsKind kind,
-                                                     int glyphNumber,
-                                                     const AffineTransform& transform) const
+std::vector<GlyphLayer> Typeface::getLayersForGlyph (int glyphNumber, const AffineTransform& transform) const
 {
-    auto* font = getNativeDetails()->getFont();
-    const auto metrics = getNativeDetails()->getAscentDescent (kind);
-    const auto factor = metrics.getHeightToPointsFactor();
-    jassert (! std::isinf (factor));
-    const auto scale = factor / (float) hb_face_get_upem (hb_font_get_face (font));
+    const auto native = getNativeDetails();
+    auto* font = native->getFont();
+    const auto scale = 1.0f / (float) hb_face_get_upem (hb_font_get_face (font));
     const auto combinedTransform = AffineTransform::scale (scale, -scale).followedBy (transform);
 
     if (auto bitmapLayer = getBitmapLayer (*this, glyphNumber, combinedTransform); ! bitmapLayer.empty())
@@ -805,27 +773,6 @@ static float doSimpleShape (const Typeface& typeface,
     }
 
     return lastX;
-}
-
-float Typeface::getStringWidth (TypefaceMetricsKind kind, const String& text, float height, float horizontalScale)
-{
-    return doSimpleShape (*this, kind, text, height, horizontalScale, [&] (auto, auto) {});
-}
-
-void Typeface::getGlyphPositions (TypefaceMetricsKind kind,
-                                  const String& text,
-                                  Array<int>& glyphs,
-                                  Array<float>& xOffsets,
-                                  float height,
-                                  float horizontalScale)
-{
-    const auto width = doSimpleShape (*this, kind, text, height, horizontalScale, [&] (auto codepoint, auto xOffset)
-    {
-        glyphs.add ((int) codepoint);
-        xOffsets.add (xOffset);
-    });
-
-    xOffsets.add (width);
 }
 
 std::vector<FontFeatureTag> Typeface::getSupportedFeatures() const
@@ -1091,7 +1038,13 @@ public:
         Array<int> glyphs;
         Array<float> positions;
 
-        typeface->getGlyphPositions (TypefaceMetricsKind::legacy, text, glyphs, positions);
+        const auto width = doSimpleShape (*typeface, TypefaceMetricsKind::legacy, text, 1.0f, 1.0f, [&] (auto codepoint, auto xOffset)
+        {
+            glyphs.add ((int) codepoint);
+            positions.add (xOffset);
+        });
+
+        positions.add (width);
 
         std::vector<GlyphAdvance> result;
 
@@ -1175,12 +1128,9 @@ public:
             return std::find (features.begin(), features.end(), "aalt") != features.end();
         }));
 
-        Array<int> glyphs;
-        Array<float> offsets;
-        typeface->getGlyphPositions (TypefaceMetricsKind::legacy, "AD", glyphs, offsets);
-
-        const auto aIndex = glyphs[0];
-        const auto dIndex = glyphs[1];
+        const auto glyphs = TypefaceTests::getGlyphPositions (typeface, "AD");
+        const auto aIndex = glyphs[0].glyph;
+        const auto dIndex = glyphs[1].glyph;
 
         beginTest ("Check feature disablement");
         {

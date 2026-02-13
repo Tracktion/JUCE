@@ -486,22 +486,21 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetRuntimeId (SAFEARRAY** pRetVal)
 {
     return withCheckedComArgs (pRetVal, *this, [&]
     {
-        if (! isFragmentRoot())
+        if (isFragmentRoot())
+            return S_OK;
+
+        SafeArrayHandle result { SafeArrayCreateVector (VT_I4, 0, 2) };
+
+        if (result == nullptr)
+            return E_OUTOFMEMORY;
+
+        for (LONG i = 0; i < 2; ++i)
         {
-            *pRetVal = SafeArrayCreateVector (VT_I4, 0, 2);
-
-            if (*pRetVal == nullptr)
-                return E_OUTOFMEMORY;
-
-            for (LONG i = 0; i < 2; ++i)
-            {
-                auto hr = SafeArrayPutElement (*pRetVal, &i, &rtid[(size_t) i]);
-
-                if (FAILED (hr))
-                    return E_FAIL;
-            }
+            if (FAILED (SafeArrayPutElement (result.get(), &i, &rtid[(size_t) i])))
+                return E_FAIL;
         }
 
+        *pRetVal = result.release();
         return S_OK;
     });
 }
