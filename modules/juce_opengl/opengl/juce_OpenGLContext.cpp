@@ -468,7 +468,7 @@ public:
             });
 
             const auto newArea = globalArea.withZeroOrigin() * displayScale;
-           #elif JUCE_WINDOWS || JUCE_LINUX
+           #elif JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
             const auto globalArea = detail::ScalingHelpers::scaledScreenPosToUnscaled (component, logicalArea);
             const auto newArea = (globalArea.toFloat() * peer->getPlatformScaleFactor()).withZeroOrigin().toNearestInt();
            #elif JUCE_IOS || JUCE_ANDROID
