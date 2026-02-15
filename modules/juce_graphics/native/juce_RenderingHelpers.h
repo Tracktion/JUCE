@@ -2655,7 +2655,7 @@ protected:
                 }
 
                 auto f = stack->font;
-                f.setHeight (f.getHeight() * stack->transform.complexTransform.mat11);
+                f.setHeight (f.getHeightInPoints() * stack->transform.complexTransform.mat11);
 
                 auto xScale = stack->transform.complexTransform.mat00 / stack->transform.complexTransform.mat11;
 
