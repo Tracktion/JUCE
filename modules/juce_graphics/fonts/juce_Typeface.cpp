@@ -522,7 +522,11 @@ static HbDrawFuncs getPathDrawFuncs()
 
 void Typeface::getOutlineForGlyph (int glyphNumber, Path& path) const
 {
-    path = getGlyphPathInGlyphUnits ((hb_codepoint_t) glyphNumber, getNativeDetails()->getFont());
+    auto* font = getNativeDetails()->getFont();
+    const auto scale = 1.0f / (float) hb_face_get_upem (hb_font_get_face (font));
+
+    path = getGlyphPathInGlyphUnits ((hb_codepoint_t) glyphNumber, font);
+    path.applyTransform (AffineTransform::scale (scale, -scale));
 }
 
 Rectangle<float> Typeface::getGlyphBounds (int glyphNumber) const
