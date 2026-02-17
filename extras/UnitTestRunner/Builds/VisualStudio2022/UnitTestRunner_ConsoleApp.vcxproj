@@ -3700,9 +3700,9 @@
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_AudioParameterChoice.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_AudioParameterFloat.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_AudioParameterInt.h"/>
+    <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_AudioPluginExtensions.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_AudioProcessorParameterWithID.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_CommonProcessorUtilities.h"/>
-    <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_ExtensionsVisitor.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_FlagCache.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_RangedAudioParameter.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_audio_processors_headless\utilities\juce_VST2ClientExtensions.h"/>

@@ -4,6 +4,100 @@
 
 ## Change
 
+AudioPluginInstance::getPlatformSpecificData() has been removed.
+
+**Possible Issues**
+
+Code that calls this function will fail to compile.
+
+**Workaround**
+
+Use the new member functions of AudioPluginInstance - getVSTClient(),
+getVST3Client(), getAudioUnitClient(), and getARAClient() - to retrieve data
+relating to the underlying implementation.
+
+**Rationale**
+
+This change allows calling code to be more self-documenting and type-safe.
+
+
+## Change
+
+The following functions have new signatures:
+- VSTPluginFormatHeadless::loadFromFXBFile()
+- VSTPluginFormatHeadless::setChunkData()
+- VSTPluginFormatHeadless::setExtraFunctions()
+
+**Possible Issues**
+
+Code that calls these functions will fail to compile.
+
+**Workaround**
+
+Instead of passing a separate data pointer and size, pass a Span of bytes to
+loadFromFXBFile() and setChunkData().
+
+Pass a unique_ptr<ExtraFunctions> to setExtraFunctions(). You may wish to use
+rawToUniquePtr() to convert a raw pointer to a unique_ptr.
+
+**Rationale**
+
+These changes result in interfaces that are more self-documenting.
+
+
+## Change
+
+The following functions have been removed:
+- VSTPluginFormatHeadless::getVSTXML()
+- VSTPluginFormatHeadless::loadFromFXBFile()
+- VSTPluginFormatHeadless::saveToFXBFile()
+- VSTPluginFormatHeadless::getChunkData()
+- VSTPluginFormatHeadless::setChunkData()
+- VSTPluginFormatHeadless::setExtraFunctions()
+- VSTPluginFormatHeadless::dispatcher()
+- VST3PluginFormatHeadless::setStateFromVSTPresetFile()
+
+**Possible Issues**
+
+Code that references these functions will fail to compile.
+
+**Workaround**
+
+Retrieve a client interface from an AudioPluginInstance by calling
+AudioPluginClient::getVSTClient() or AudioPluginClient::getVST3Client(), then
+call the appropriate member function on the client interface.
+
+**Rationale**
+
+This approach leads to more intuitive code. It's no longer necessary to call a
+static member function of the plugin format in order to interact with
+format-specific aspects of a particular plugin instance.
+
+
+## Change
+
+The ExtensionsVisitor type has been removed.
+
+**Possible Issues**
+
+Code that references this type, e.g. by deriving from it, will fail to compile.
+
+**Workaround**
+
+Use the new member functions of AudioPluginInstance - getVSTClient(),
+getVST3Client(), getAudioUnitClient(), and getARAClient() - to interact with
+format-specific aspects of the wrapped plugin.
+
+**Rationale**
+
+The visitor pattern results in very boilerplate-heavy code, both for
+implementers and for users. The new API is much more lightweight. Additionally,
+the ExtensionsVisitor API was intended for advanced users who should be able to
+migrate to a new API without much difficulty.
+
+
+## Change
+
 The following member functions of Typeface have been removed:
 - Typeface::getStringWidth()
 - Typeface::getGlyphPositions()
