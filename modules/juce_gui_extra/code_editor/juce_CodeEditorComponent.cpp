@@ -1696,12 +1696,7 @@ int CodeEditorComponent::columnToIndex (int lineNum, int column) const noexcept
 void CodeEditorComponent::setFont (const Font& newFont)
 {
     font = newFont;
-    charWidth = 0;
-
-    if (const auto typeface = font.getTypefacePtr())
-        if (const auto glyph = typeface->getNominalGlyphForCodepoint ('0'))
-            charWidth = typeface->getGlyphBounds ((int) *glyph).getWidth();
-
+    charWidth = TextLayout::getStringWidth (font, "0");
     lineHeight = roundToInt (font.getHeight());
     resized();
 }
