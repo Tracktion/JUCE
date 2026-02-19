@@ -329,7 +329,8 @@ public:
 private:
     struct DelegateClass final : public ObjCClass<NSObject>
     {
-        DelegateClass()  : ObjCClass<NSObject> ("JUCEDelegate_")
+        DelegateClass()
+            : ObjCClass ("JUCEDelegate_")
         {
             addMethod (darkModeSelector, [] (id, SEL, NSNotification*) { Desktop::getInstance().darkModeChanged(); });
             registerClass();
