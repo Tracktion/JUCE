@@ -183,15 +183,14 @@ void ComponentBoundsConstrainer::checkBounds (Rectangle<int>& bounds,
                                               bool isStretchingBottom,
                                               bool isStretchingRight)
 {
+    bounds.setWidth (jlimit (minW, maxW, bounds.getWidth()));
+    bounds.setHeight (jlimit (minH, maxH, bounds.getHeight()));
+
     if (isStretchingLeft)
-        bounds.setLeft (jlimit (old.getRight() - maxW, old.getRight() - minW, bounds.getX()));
-    else
-        bounds.setWidth (jlimit (minW, maxW, bounds.getWidth()));
+        bounds = bounds.withRightX (old.getRight());
 
     if (isStretchingTop)
-        bounds.setTop (jlimit (old.getBottom() - maxH, old.getBottom() - minH, bounds.getY()));
-    else
-        bounds.setHeight (jlimit (minH, maxH, bounds.getHeight()));
+        bounds = bounds.withBottomY (old.getBottom());
 
     if (bounds.isEmpty())
         return;
