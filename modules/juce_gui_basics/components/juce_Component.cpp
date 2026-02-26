@@ -40,6 +40,17 @@
 namespace juce
 {
 
+class Component::CachedComponentImageInfo
+{
+public:
+    explicit CachedComponentImageInfo (std::unique_ptr<CachedComponentImage> newCachedImage)
+        : cachedImage (std::move (newCachedImage))
+    {}
+
+    std::unique_ptr<CachedComponentImage> cachedImage{};
+    ComponentPaintDiagnostics* currentDiagnostics{};
+};
+
 static Component* findFirstEnabledAncestor (Component* in)
 {
     if (in == nullptr)
@@ -209,7 +220,11 @@ public:
         return std::exchange (effect, &i) != &i;
     }
 
-    void paint (Graphics& g, Component& c, bool ignoreAlphaLevel, OpaqueLayer& opaqueLayer)
+    void paint (Graphics& g,
+                Component& c,
+                bool ignoreAlphaLevel,
+                OpaqueLayer& opaqueLayer,
+                ComponentPaintDiagnostics& diagnostics)
     {
         auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
         auto scaledBounds = c.getLocalBounds() * scale;
@@ -238,12 +253,15 @@ public:
             Graphics g2 (effectImage);
             g2.addTransform (AffineTransform::scale ((float) scaledBounds.getWidth()  / (float) c.getWidth(),
                                                      (float) scaledBounds.getHeight() / (float) c.getHeight()));
-            c.paintComponentAndChildren (g2, opaqueLayer);
+
+            c.paintComponentAndChildren (g2, opaqueLayer, diagnostics);
         }
 
         Graphics::ScopedSaveState ss (g);
 
         g.addTransform (AffineTransform::scale (1.0f / scale));
+
+        const auto diagnosticTimer = diagnostics.applyEffectDuration.createTimer();
         effect->applyEffect (effectImage, g, scale, ignoreAlphaLevel ? 1.0f : c.getAlpha());
     }
 
@@ -304,6 +322,12 @@ public:
         // pushComponent() is still alive!
         jassert (currentComponent != nullptr);
         return getNonOccludedBoundsForCurrentComponent<ObscuredBy::childrenOnly> (g.getClipBounds());
+    }
+
+    void removeOpaqueComponentAndChildren (const Component& component)
+    {
+        removeOpaqueComponent (component);
+        removeOpaqueChildren (component);
     }
 
 private:
@@ -388,8 +412,7 @@ private:
             if (! isVisibleToLayer (*child))
                 continue;
 
-            removeOpaqueComponent (*child);
-            removeOpaqueChildren (*child);
+            removeOpaqueComponentAndChildren (*child);
         }
     }
 
@@ -773,11 +796,26 @@ bool Component::isOpaque() const noexcept
 //==============================================================================
 void Component::setCachedComponentImage (CachedComponentImage* newCachedImage)
 {
-    if (cachedImage.get() != newCachedImage)
+    if (newCachedImage == nullptr)
     {
-        cachedImage.reset (newCachedImage);
+        if (cachedImageInfo == nullptr)
+            return;
+
+        cachedImageInfo.reset();
         repaint();
+        return;
     }
+
+    if (cachedImageInfo != nullptr && cachedImageInfo->cachedImage.get() == newCachedImage)
+        return;
+
+    cachedImageInfo = std::make_unique<CachedComponentImageInfo> (std::unique_ptr<CachedComponentImage> { newCachedImage });
+    repaint();
+}
+
+CachedComponentImage* Component::getCachedComponentImage() const noexcept
+{
+    return cachedImageInfo == nullptr ? nullptr : cachedImageInfo->cachedImage.get();
 }
 
 void Component::setBufferedToImage (bool shouldBeBuffered)
@@ -786,23 +824,23 @@ void Component::setBufferedToImage (bool shouldBeBuffered)
     // so by calling setBufferedToImage, you'll be deleting the custom one - this is almost certainly
     // not what you wanted to happen... If you really do know what you're doing here, and want to
     // avoid this assertion, just call setCachedComponentImage (nullptr) before setBufferedToImage().
-    jassert (cachedImage == nullptr || dynamic_cast<detail::StandardCachedComponentImage*> (cachedImage.get()) != nullptr);
+    jassert (cachedImageInfo == nullptr || dynamic_cast<detail::StandardCachedComponentImage*> (cachedImageInfo->cachedImage.get()) != nullptr);
 
     if (shouldBeBuffered)
     {
-        if (cachedImage == nullptr)
-            cachedImage = std::make_unique<detail::StandardCachedComponentImage> (*this);
+        if (cachedImageInfo == nullptr)
+            cachedImageInfo = std::make_unique<CachedComponentImageInfo> (std::make_unique<detail::StandardCachedComponentImage> (*this));
     }
     else
     {
-        cachedImage.reset();
+        cachedImageInfo.reset();
     }
 }
 
 void Component::invalidateCachedImageResources()
 {
-    if (cachedImage != nullptr)
-        cachedImage->releaseResources();
+    if (cachedImageInfo != nullptr)
+        cachedImageInfo->cachedImage->releaseResources();
 
     if (effectState != nullptr)
         effectState->releaseResources();
@@ -1056,9 +1094,9 @@ void Component::setBounds (int x, int y, int w, int h)
             else if (! flags.hasHeavyweightPeerFlag)
                 repaintParent();
         }
-        else if (cachedImage != nullptr)
+        else if (cachedImageInfo != nullptr)
         {
-            cachedImage->invalidateAll();
+            cachedImageInfo->cachedImage->invalidateAll();
         }
 
         flags.isMoveCallbackPending = wasMoved;
@@ -1840,9 +1878,9 @@ void Component::internalRepaintUnchecked (Rectangle<int> area, bool isEntireComp
 
     if (flags.visibleFlag)
     {
-        if (cachedImage != nullptr)
-            if (! (isEntireComponent ? cachedImage->invalidateAll()
-                                     : cachedImage->invalidate (area)))
+        if (cachedImageInfo != nullptr)
+            if (! (isEntireComponent ? cachedImageInfo->cachedImage->invalidateAll()
+                                     : cachedImageInfo->cachedImage->invalidate (area)))
                 return;
 
         if (area.isEmpty())
@@ -1882,17 +1920,25 @@ void Component::paintOverChildren (Graphics&)
 }
 
 //==============================================================================
-void Component::paintWithinParentContext (Graphics& g, OpaqueLayer& opaqueLayer)
+void Component::paintWithinParentContext (Graphics& g, OpaqueLayer& opaqueLayer, ComponentPaintDiagnostics& diagnostics)
 {
     g.setOrigin (getPosition());
 
-    if (cachedImage != nullptr)
-        cachedImage->paint (g);
-    else
-        paintEntireComponent (g, false, opaqueLayer);
+    if (cachedImageInfo == nullptr)
+    {
+        paintEntireComponent (g, false, opaqueLayer, diagnostics);
+        return;
+    }
+
+    opaqueLayer.removeOpaqueComponentAndChildren (*this);
+
+    const ScopedValueSetter scopedDiagnostics { cachedImageInfo->currentDiagnostics, &diagnostics };
+
+    cachedImageInfo->currentDiagnostics->readFromCache = true;
+    cachedImageInfo->cachedImage->paint (g);
 }
 
-void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer)
+void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer, ComponentPaintDiagnostics& diagnostics)
 {
    #if JUCE_ETW_TRACELOGGING
     {
@@ -1917,6 +1963,7 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
         if (! isPaintingUnclipped())
             g.reduceClipRegion (paintBounds);
 
+        const auto diagnosticTimer = diagnostics.paintDuration.createTimer();
         paint (g);
     }
 
@@ -1925,6 +1972,15 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
         if (! detail::ComponentHelpers::isVisibleWithNonZeroArea (*child))
             continue;
 
+        ComponentPaintDiagnostics childDiagnostics;
+
+        const ScopeGuard scopedListenerCallback { [&]
+        {
+            child->componentListeners.call ([&] (auto& l) { l.componentPainted (*child, childDiagnostics); });
+        } };
+
+        const auto diagnosticTimer = childDiagnostics.totalPaintDuration.createTimer();
+
         if (child->isTransformed() || child->componentTransparency != 0)
         {
             Graphics::ScopedSaveState ss (g);
@@ -1932,7 +1988,7 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
             if (auto& transform = child->affineTransform)
                 g.addTransform (*transform);
 
-            child->paintWithinParentContext (g, opaqueLayer);
+            child->paintWithinParentContext (g, opaqueLayer, childDiagnostics);
         }
         else
         {
@@ -1947,7 +2003,7 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
             if (! child->isPaintingUnclipped())
                 g.reduceClipRegion (componentBounds);
 
-            child->paintWithinParentContext (g, opaqueLayer);
+            child->paintWithinParentContext (g, opaqueLayer, childDiagnostics);
         }
     }
 
@@ -1956,16 +2012,49 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
     if (! isPaintingUnclipped())
         g.reduceClipRegion (getLocalBounds());
 
+    const auto diagnosticTimer = diagnostics.paintOverChildrenDuration.createTimer();
     paintOverChildren (g);
 }
 
 void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel)
 {
     OpaqueLayer opaqueLayer { this };
-    paintEntireComponent (g, ignoreAlphaLevel, opaqueLayer);
+
+    // If we are writing into a cached image we don't want to generate a
+    // completely independent callback, so we skip the creation of a new
+    // diagnostics object and use the diagnostics captured in the original call
+    // to paint this component. However, if while painting into the cache we
+    // end up in a recursive call to painting this component, it is preferable
+    // that we create an independent callback so the user can decide what to do
+    // with the data from multiple paint method invocations.
+    //
+    // Note: readFromCache is set directly *before* reading from the cache and
+    // wroteToCache is set directly *before* writing to the cache. This means
+    // we can use them as flags to detect if we are already reading from or
+    // writing to a cache.
+
+    if (cachedImageInfo != nullptr
+        && cachedImageInfo->currentDiagnostics != nullptr
+        && cachedImageInfo->currentDiagnostics->readFromCache
+        && ! cachedImageInfo->currentDiagnostics->wroteToCache)
+    {
+        cachedImageInfo->currentDiagnostics->wroteToCache = true;
+        paintEntireComponent (g, ignoreAlphaLevel, opaqueLayer, *cachedImageInfo->currentDiagnostics);
+        return;
+    }
+
+    ComponentPaintDiagnostics diagnostics;
+
+    const ScopeGuard scopedListenerCallback { [&]
+    {
+        componentListeners.call ([&] (auto& l) { l.componentPainted (*this, diagnostics); });
+    } };
+
+    const auto diagnosticTimer = diagnostics.totalPaintDuration.createTimer();
+    paintEntireComponent (g, ignoreAlphaLevel, opaqueLayer, diagnostics);
 }
 
-void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel, OpaqueLayer& opaqueLayer)
+void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel, OpaqueLayer& opaqueLayer, ComponentPaintDiagnostics& diagnostics)
 {
     // If sizing a top-level-window and the OS paint message is delivered synchronously
     // before resized() is called, then we'll invoke the callback here, to make sure
@@ -1981,7 +2070,7 @@ void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel, Opaque
 
     if (effectState != nullptr)
     {
-        effectState->paint (g, *this, ignoreAlphaLevel, opaqueLayer);
+        effectState->paint (g, *this, ignoreAlphaLevel, opaqueLayer, diagnostics);
     }
     else if (componentTransparency > 0 && ! ignoreAlphaLevel)
     {
@@ -1989,18 +2078,18 @@ void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel, Opaque
         {
             OpaqueLayer transparentOpaqueLayer { this };
             g.beginTransparencyLayer (getAlpha());
-            paintComponentAndChildren (g, transparentOpaqueLayer);
+            paintComponentAndChildren (g, transparentOpaqueLayer, diagnostics);
             g.endTransparencyLayer();
         }
     }
     else if (isTransformed())
     {
         OpaqueLayer transformedOpaqueLayer { this };
-        paintComponentAndChildren (g, transformedOpaqueLayer);
+        paintComponentAndChildren (g, transformedOpaqueLayer, diagnostics);
     }
     else
     {
-        paintComponentAndChildren (g, opaqueLayer);
+        paintComponentAndChildren (g, opaqueLayer, diagnostics);
     }
 
    #if JUCE_DEBUG
@@ -3263,9 +3352,16 @@ struct ComponentTests  : public UnitTest
     {
     }
 
-    struct TestComponent : Component
+    class TestComponent : private ComponentListener,
+                          public Component
     {
-        void paint (Graphics& g) final
+    public:
+        TestComponent()
+        {
+            addComponentListener (this);
+        }
+
+        void paint (Graphics& g) override
         {
             lastClipBounds = g.getClipBounds();
             ++numPaintCalls;
@@ -3276,9 +3372,38 @@ struct ComponentTests  : public UnitTest
             ++numPaintOverChildrenCalls;
         }
 
-        int numPaintCalls = 0;
-        int numPaintOverChildrenCalls = 0;
+        int numPaintCalls{};
+        int numPaintOverChildrenCalls{};
+        int numCacheHits{};
+        int numComponentPaintedCalls{};
         Rectangle<int> lastClipBounds;
+
+    private:
+        void componentPainted (Component&, const ComponentPaintDiagnostics& d) final
+        {
+            ++numComponentPaintedCalls;
+
+            if (d.readFromCache && ! d.wroteToCache)
+                numCacheHits += 1;
+        }
+    };
+
+    class RecursiveTestComponent : public TestComponent
+    {
+    public:
+        void paint (Graphics& g) override
+        {
+            TestComponent::paint (g);
+
+            if (isPainting)
+                return;
+
+            const ScopedValueSetter svs { isPainting, true };
+            paintEntireComponent (g, false);
+        }
+
+    private:
+        bool isPainting{};
     };
 
     void paintComponentBounds (Component& componentToRepaint)
@@ -3291,539 +3416,847 @@ struct ComponentTests  : public UnitTest
     {
         ScopedJuceInitialiser_GUI libraryInitialiser;
 
-        beginTest ("Painting a parents bounds paints both parent and child");
+        testCase ("Painting a parents bounds paints both parent and child", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            parent.addAndMakeVisible (child);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (parent->numPaintOverChildrenCalls, 0);
-            expectEquals (child->numPaintCalls, 0);
-            expectEquals (child->numPaintOverChildrenCalls, 0);
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (parent.numPaintOverChildrenCalls, 0);
+            expectEquals (parent.numComponentPaintedCalls, 0);
+            expectEquals (child.numPaintCalls, 0);
+            expectEquals (child.numPaintOverChildrenCalls, 0);
+            expectEquals (child.numComponentPaintedCalls, 0);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-            expectEquals (child->numPaintCalls, 1);
-            expectEquals (child->numPaintOverChildrenCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+            expectEquals (parent.numComponentPaintedCalls, 1);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numPaintOverChildrenCalls, 1);
+            expectEquals (child.numComponentPaintedCalls, 1);
+        });
 
-        beginTest ("Non-opaque children require their parent to repaint");
+        testCase ("Non-opaque children require their parent to repaint", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*child);
+            paintComponentBounds (child);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 1);
+        });
 
-        beginTest ("Opaque children don't require their parent to repaint");
+        testCase ("Opaque children don't require their parent to repaint", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            child->setOpaque (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            child.setOpaque (true);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*child);
+            paintComponentBounds (child);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (child->numPaintCalls, 1);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+        });
 
-        beginTest ("Opaque children don't require their parent to repaint (even when the parent uses setPaintingIsUnclipped (true))");
+        testCase ("Opaque children don't require their parent to repaint (even when the parent uses setPaintingIsUnclipped (true))", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setPaintingIsUnclipped (true);
-            parent->setBounds (bounds);
+            parent.setPaintingIsUnclipped (true);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            child->setOpaque (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            child.setOpaque (true);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*child);
+            paintComponentBounds (child);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (child->numPaintCalls, 1);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+        });
 
-        beginTest ("A partially obscured parent will repaint with reduced clip bounds");
+        testCase ("A partially obscured parent will repaint with reduced clip bounds", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.removeFromTop (50));
-            child->setOpaque (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.removeFromTop (50));
+            child.setOpaque (true);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 1);
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 1);
 
-            expect (parent->lastClipBounds == bounds);
-        }
+            expect (parent.lastClipBounds == bounds);
+        });
 
-        beginTest ("A totally obscured parent will never repaint");
+        testCase ("A totally obscured parent will never repaint", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds.removeFromTop (50));
-            child1->setOpaque (true);
-            parent->addAndMakeVisible (*child1);
+            child1.setBounds (bounds.removeFromTop (50));
+            child1.setOpaque (true);
+            parent.addAndMakeVisible (child1);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            parent->addAndMakeVisible (*child2);
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            parent.addAndMakeVisible (child2);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-            expectEquals (child1->numPaintCalls, 1);
-            expectEquals (child2->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 1);
+        });
 
-        beginTest ("An opaque component will hide sibling components behind it");
+        testCase ("An opaque component will hide sibling components behind it", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
-            const auto child3 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            parent->addAndMakeVisible (*child1);
+            child1.setBounds (bounds);
+            parent.addAndMakeVisible (child1);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            parent->addAndMakeVisible (*child2);
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            parent.addAndMakeVisible (child2);
 
-            child3->setBounds (bounds);
-            parent->addAndMakeVisible (*child3);
+            child3.setBounds (bounds);
+            parent.addAndMakeVisible (child3);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child1->numPaintOverChildrenCalls, 0);
-            expectEquals (child2->numPaintCalls, 1);
-            expectEquals (child3->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child1.numPaintOverChildrenCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
+        });
 
-        beginTest ("An opaque component will hide parent-sibling components behind it");
+        testCase ("An opaque component will hide parent-sibling components behind it", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
-            const auto child3 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            parent->addAndMakeVisible (*child1);
+            child1.setBounds (bounds);
+            parent.addAndMakeVisible (child1);
 
-            child2->setBounds (bounds);
-            parent->addAndMakeVisible (*child2);
+            child2.setBounds (bounds);
+            parent.addAndMakeVisible (child2);
 
-            child3->setBounds (bounds);
-            child3->setOpaque (true);
-            child2->addAndMakeVisible (*child3);
+            child3.setBounds (bounds);
+            child3.setOpaque (true);
+            child2.addAndMakeVisible (child3);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (parent->numPaintOverChildrenCalls, 1);
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child1->numPaintOverChildrenCalls, 0);
-            expectEquals (child2->numPaintCalls, 0);
-            expectEquals (child2->numPaintOverChildrenCalls, 1);
-            expectEquals (child3->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (parent.numPaintOverChildrenCalls, 1);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child1.numPaintOverChildrenCalls, 0);
+            expectEquals (child2.numPaintCalls, 0);
+            expectEquals (child2.numPaintOverChildrenCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
+        });
 
-        beginTest ("An opaque component will reduce the clip bounds of sibling components behind it");
+        testCase ("An opaque component will reduce the clip bounds of sibling components behind it", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
-            const auto child3 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            parent->addAndMakeVisible (*child1);
+            child1.setBounds (bounds);
+            parent.addAndMakeVisible (child1);
 
-            child2->setBounds (bounds.removeFromTop (50));
-            child2->setOpaque (true);
-            parent->addAndMakeVisible (*child2);
+            child2.setBounds (bounds.removeFromTop (50));
+            child2.setOpaque (true);
+            parent.addAndMakeVisible (child2);
 
-            child3->setBounds (child1->getBounds());
-            parent->addAndMakeVisible (*child3);
+            child3.setBounds (child1.getBounds());
+            parent.addAndMakeVisible (child3);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child1->numPaintCalls, 1);
-            expectEquals (child2->numPaintCalls, 1);
-            expectEquals (child3->numPaintCalls, 1);
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
 
-            expect (child1->lastClipBounds == bounds);
-            expect (child3->lastClipBounds == child3->getBounds());
-        }
+            expect (child1.lastClipBounds == bounds);
+            expect (child3.lastClipBounds == child3.getBounds());
+        });
 
-        beginTest ("A child component will be clipped when painted");
+        testCase ("A child component will be clipped when painted", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            parent.addAndMakeVisible (child);
 
-            expect (parent->lastClipBounds.isEmpty());
-            expect (child->lastClipBounds.isEmpty());
+            expect (parent.lastClipBounds.isEmpty());
+            expect (child.lastClipBounds.isEmpty());
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expect (parent->lastClipBounds == parent->getLocalBounds());
-            expect (child->lastClipBounds == child->getLocalBounds());
-        }
+            expect (parent.lastClipBounds == parent.getLocalBounds());
+            expect (child.lastClipBounds == child.getLocalBounds());
+        });
 
-        beginTest ("setPaintingIsUnclipped (true) will cause a child to have its parents clip bounds");
+        testCase ("setPaintingIsUnclipped (true) will cause a child to have its parents clip bounds", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.reduced (25));
-            child->setPaintingIsUnclipped (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.reduced (25));
+            child.setPaintingIsUnclipped (true);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expect (child->lastClipBounds == child->getLocalArea (parent.get(), parent->getLocalBounds()));
-        }
+            expect (child.lastClipBounds == child.getLocalArea (&parent, parent.getLocalBounds()));
+        });
 
-        beginTest ("Opaque components hide parents that use setPaintingIsUnclipped (true)");
+        testCase ("Opaque components hide parents that use setPaintingIsUnclipped (true)", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
-            parent->setPaintingIsUnclipped (true);
+            parent.setBounds (bounds);
+            parent.setPaintingIsUnclipped (true);
 
-            child->setBounds (bounds);
-            child->setOpaque (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds);
+            child.setOpaque (true);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (child->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child.numPaintCalls, 1);
+        });
 
-        beginTest ("Opaque components hide parents that use setPaintingIsUnclipped (true)");
+        testCase ("Invisible child components will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
-            parent->setPaintingIsUnclipped (true);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds);
-            child->setOpaque (true);
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds);
+            child.setOpaque (true);
+            parent.addChildComponent (child);
 
-            paintComponentBounds (*parent);
+            expect (! child.isVisible());
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (child->numPaintCalls, 1);
-        }
+            paintComponentBounds (parent);
 
-        beginTest ("Invisible child components will not be considered opaque");
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 0);
+        });
+
+        testCase ("Invisible sibling components will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds);
-            child->setOpaque (true);
-            parent->addChildComponent (*child);
+            child1.setBounds (bounds);
+            parent.addAndMakeVisible (child1);
 
-            expect (! child->isVisible());
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            parent.addChildComponent (child2);
 
-            paintComponentBounds (*parent);
+            expect (  child1.isVisible());
+            expect (! child2.isVisible());
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 0);
-        }
+            paintComponentBounds (parent);
 
-        beginTest ("Invisible sibling components will not be considered opaque");
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 0);
+        });
+
+        testCase ("Components with an invisible parent will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
+            TestComponent grandchild;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            parent->addAndMakeVisible (*child1);
+            child.setBounds (bounds);
+            parent.addChildComponent (child);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            parent->addChildComponent (*child2);
+            grandchild.setBounds (bounds);
+            grandchild.setOpaque (true);
+            child.addAndMakeVisible (grandchild);
 
-            expect (  child1->isVisible());
-            expect (! child2->isVisible());
+            expect (! child.isVisible());
+            expect (grandchild.isVisible());
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (child1->numPaintCalls, 1);
-            expectEquals (child2->numPaintCalls, 0);
-        }
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 0);
+            expectEquals (grandchild.numPaintCalls, 0);
+        });
 
-        beginTest ("Components with an invisible parent will not be considered opaque");
+        testCase ("Components with a width of 0 will not have their paint functions called", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
-            const auto grandchild = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds);
-            parent->addChildComponent (*child);
+            child.setBounds (bounds.withWidth (0));
+            parent.addAndMakeVisible (child);
 
-            grandchild->setBounds (bounds);
-            grandchild->setOpaque (true);
-            child->addAndMakeVisible (*grandchild);
+            paintComponentBounds (parent);
 
-            expect (! child->isVisible());
-            expect (grandchild->isVisible());
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 0);
+            expectEquals (child.numPaintOverChildrenCalls, 0);
+        });
 
-            paintComponentBounds (*parent);
-
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 0);
-            expectEquals (grandchild->numPaintCalls, 0);
-        }
-
-        beginTest ("Components with a width of 0 will not have their paint functions called");
+        testCase ("Components with a height of 0 will not have their paint functions called", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.withWidth (0));
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds.withHeight (0));
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 0);
-            expectEquals (child->numPaintOverChildrenCalls, 0);
-        }
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 0);
+            expectEquals (child.numPaintOverChildrenCalls, 0);
+        });
 
-        beginTest ("Components with a height of 0 will not have their paint functions called");
+        testCase ("Transparent components will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds.withHeight (0));
-            parent->addAndMakeVisible (*child);
+            child.setBounds (bounds);
+            child.setOpaque (true);
+            child.setAlpha (0.5f);
+            parent.addAndMakeVisible (child);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 0);
-            expectEquals (child->numPaintOverChildrenCalls, 0);
-        }
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 1);
+        });
 
-        beginTest ("Transparent components will not be considered opaque");
+        testCase ("Opaque components will only be considered opaque up to a transparent parent", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds);
-            child->setOpaque (true);
-            child->setAlpha (0.5f);
-            parent->addAndMakeVisible (*child);
+            child1.setBounds (bounds);
+            child1.setAlpha (0.5f);
+            parent.addAndMakeVisible (child1);
 
-            paintComponentBounds (*parent);
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            child1.addAndMakeVisible (child2);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 1);
-        }
+            paintComponentBounds (parent);
 
-        beginTest ("Opaque components will only be considered opaque up to a transparent parent");
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+        });
+
+        testCase ("Transformed components will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            child1->setAlpha (0.5f);
-            parent->addAndMakeVisible (*child1);
+            child.setBounds (bounds);
+            child.setOpaque (true);
+            child.setTransform (AffineTransform::rotation (degreesToRadians (45.0f)));
+            parent.addAndMakeVisible (child);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            child1->addAndMakeVisible (*child2);
+            paintComponentBounds (parent);
 
-            paintComponentBounds (*parent);
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child.numPaintCalls, 1);
+        });
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child2->numPaintCalls, 1);
-        }
-
-        beginTest ("Transformed components will not be considered opaque");
+        testCase ("Opaque components will only be considered opaque up to a transformed parent", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child->setBounds (bounds);
-            child->setOpaque (true);
-            child->setTransform (AffineTransform::rotation (degreesToRadians (45.0f)));
-            parent->addAndMakeVisible (*child);
+            child1.setBounds (bounds);
+            child1.setTransform (AffineTransform::rotation (degreesToRadians (45.0f)));
+            parent.addAndMakeVisible (child1);
 
-            paintComponentBounds (*parent);
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            child1.addAndMakeVisible (child2);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child->numPaintCalls, 1);
-        }
+            paintComponentBounds (parent);
 
-        beginTest ("Opaque components will only be considered opaque up to a transformed parent");
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+        });
+
+        testCase ("Nested opaque components prevent parents from being painted", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
 
-            child1->setBounds (bounds);
-            child1->setTransform (AffineTransform::rotation (degreesToRadians (45.0f)));
-            parent->addAndMakeVisible (*child1);
+            child1.setBounds (bounds);
+            child1.setOpaque (true);
+            parent.addAndMakeVisible (child1);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            child1->addAndMakeVisible (*child2);
+            child2.setBounds (bounds);
+            child2.setOpaque (true);
+            child1.addAndMakeVisible (child2);
 
-            paintComponentBounds (*parent);
+            paintComponentBounds (parent);
 
-            expectEquals (parent->numPaintCalls, 1);
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child2->numPaintCalls, 1);
-        }
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+        });
 
-        beginTest ("Nested opaque components prevent parents from being painted");
+        testCase ("Areas of an opaque component outside its parent will not be considered opaque", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
+
+            parent.setBounds ({ 0, 0, 100, 100 });
+
+            child1.setBounds ({ 50, 0, 50, 100 });
+            parent.addAndMakeVisible (child1);
+
+            child2.setBounds ({ -50, 0, 100, 100 });
+            child2.setOpaque (true);
+            child1.addAndMakeVisible (child2);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 1);
+            expect (parent.lastClipBounds == Rectangle { 0, 0, 50, 100 });
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+            expect (child2.lastClipBounds == Rectangle { 50, 0, 50, 100 });
+        });
+
+        testCase ("Painting a component that is buffered to an image, results in a cache hit", [&]
+        {
+            // Note top-level components can't be buffered to an image!
+            TestComponent parent;
+            TestComponent child;
 
             Rectangle<int> bounds { 0, 0, 100, 100 };
-            parent->setBounds (bounds);
+            parent.setBounds (bounds);
+            child.setBounds (bounds);
+            child.setBufferedToImage (true);
+            parent.addAndMakeVisible (child);
 
-            child1->setBounds (bounds);
-            child1->setOpaque (true);
-            parent->addAndMakeVisible (*child1);
+            // paint the component once first
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numCacheHits, 0);
 
-            child2->setBounds (bounds);
-            child2->setOpaque (true);
-            child1->addAndMakeVisible (*child2);
+            // repaint the component without invalidating it
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numCacheHits, 1);
 
-            paintComponentBounds (*parent);
+            // repaint the component without invalidating it again
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numCacheHits, 2);
+        });
 
-            expectEquals (parent->numPaintCalls, 0);
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child2->numPaintCalls, 1);
-        }
-
-        beginTest ("Areas of an opaque component outside its parent will not be considered opaque");
+        testCase ("Painting a component that is buffered to an image, after calling repaint, "
+                  "results in a cache miss", [&]
         {
-            const auto parent = std::make_unique<TestComponent>();
-            const auto child1 = std::make_unique<TestComponent>();
-            const auto child2 = std::make_unique<TestComponent>();
-            const auto child3 = std::make_unique<TestComponent>();
+            // Note top-level components can't be buffered to an image!
+            TestComponent parent;
+            TestComponent child;
 
-            parent->setBounds ({ 0, 0, 100, 100 });
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child.setBounds (bounds);
+            child.setBufferedToImage (true);
+            parent.addAndMakeVisible (child);
 
-            child1->setBounds ({ 50, 0, 50, 100 });
-            parent->addAndMakeVisible (*child1);
+            // paint the component once first
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numCacheHits, 0);
 
-            child2->setBounds ({ -50, 0, 100, 100 });
-            child2->setOpaque (true);
-            child1->addAndMakeVisible (*child2);
+            // repaint the component after invalidating it
+            child.repaint();
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 2);
+            expectEquals (child.numCacheHits, 0);
 
-            paintComponentBounds (*parent);
+            // repaint the component without invalidating it
+            paintComponentBounds (child);
+            expectEquals (child.numPaintCalls, 2);
+            expectEquals (child.numCacheHits, 1);
+        });
 
-            expectEquals (parent->numPaintCalls, 1);
-            expect (parent->lastClipBounds == Rectangle { 0, 0, 50, 100 });
-            expectEquals (child1->numPaintCalls, 0);
-            expectEquals (child2->numPaintCalls, 1);
-            expect (child2->lastClipBounds == Rectangle { 50, 0, 50, 100 });
-        }
+        testCase ("A component that is buffered to an image but obscured by an opaque child, "
+                  "still paints the cached image", [&]
+        {
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
+            TestComponent child4;
+
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child1.setBounds (bounds);
+            child2.setBounds (bounds);
+            child3.setBounds (bounds);
+            child4.setBounds (bounds);
+
+            child2.setBufferedToImage (true);
+            child3.setOpaque (true);
+
+            parent.addAndMakeVisible (child1);
+            parent.addAndMakeVisible (child2);
+            child2.addAndMakeVisible (child3);
+            parent.addAndMakeVisible (child4);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 0);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child4.numPaintCalls, 1);
+            expectEquals (child2.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 0);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child4.numPaintCalls, 2);
+            expectEquals (child2.numCacheHits, 1);
+        });
+
+        testCase ("A component that is buffered to an image is obscured by an opaque component", [&]
+        {
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child1.setBounds (bounds);
+            child2.setBounds (bounds);
+
+            child1.setBufferedToImage (true);
+            child2.setOpaque (true);
+
+            parent.addAndMakeVisible (child1);
+            parent.addAndMakeVisible (child2);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child1.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 0);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 2);
+            expectEquals (child1.numCacheHits, 0);
+
+            child2.setVisible (false);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 2);
+            expectEquals (child1.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 2);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 2);
+            expectEquals (child1.numCacheHits, 1);
+        });
+
+        testCase ("A component that is a child of a component buffered to an image is not "
+                  "obscured by an opaque component outside the buffered image", [&]
+        {
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
+
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child1.setBounds (bounds);
+            child2.setBounds (bounds.reduced (25));
+            child3.setBounds (bounds.reduced (25));
+
+            parent.addAndMakeVisible (child1);
+            child1.addAndMakeVisible (child2);
+            parent.addAndMakeVisible (child3);
+
+            child1.setBufferedToImage (true);
+            child3.setOpaque (true);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child1.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 2);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 2);
+            expectEquals (child1.numCacheHits, 1);
+        });
+
+        testCase ("A component that is a child of a component buffered to an image is obscured by "
+                  "an opaque component inside the buffered image", [&]
+        {
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
+
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child1.setBounds (bounds);
+            child2.setBounds (bounds.reduced (25));
+            child3.setBounds (bounds.reduced (25));
+
+            parent.addAndMakeVisible (child1);
+            child1.addAndMakeVisible (child2);
+            child1.addAndMakeVisible (child3);
+
+            child1.setBufferedToImage (true);
+            child3.setOpaque (true);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 0);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child1.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 2);
+            expectEquals (child1.numPaintCalls, 1);
+            expectEquals (child2.numPaintCalls, 0);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child1.numCacheHits, 1);
+        });
+
+        testCase ("An opaque component that is a child of a component buffered to an image "
+                  "obscures components outside the buffered image", [&]
+        {
+            TestComponent parent;
+            TestComponent child1;
+            TestComponent child2;
+            TestComponent child3;
+
+            Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child1.setBounds (bounds.reduced (25));
+            child2.setBounds (bounds);
+            child3.setBounds (bounds.reduced (25));
+
+            parent.addAndMakeVisible (child1);
+            parent.addAndMakeVisible (child2);
+            child2.addAndMakeVisible (child3);
+
+            child2.setBufferedToImage (true);
+            child3.setOpaque (true);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 1);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child2.numCacheHits, 0);
+
+            paintComponentBounds (parent);
+
+            expectEquals (parent.numPaintCalls, 2);
+            expectEquals (child1.numPaintCalls, 0);
+            expectEquals (child2.numPaintCalls, 1);
+            expectEquals (child3.numPaintCalls, 1);
+            expectEquals (child2.numCacheHits, 1);
+        });
+
+        testCase ("Recursive paint calls trigger additional componentPainted callbacks", [&]
+        {
+            RecursiveTestComponent component;
+            component.setBounds ({ 0, 0, 100, 100 });
+
+            paintComponentBounds (component);
+
+            expectEquals (component.numPaintCalls, 2);
+            expectEquals (component.numComponentPaintedCalls, 2);
+        });
+
+        testCase ("A component cached to an image always triggers a componentPainted callback", [&]
+        {
+            TestComponent parent;
+            TestComponent child;
+
+            const Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child.setBounds (bounds);
+
+            parent.addAndMakeVisible (child);
+
+            child.setBufferedToImage (true);
+
+            paintComponentBounds (child);
+
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numComponentPaintedCalls, 1);
+
+            paintComponentBounds (parent);
+
+            expectEquals (child.numPaintCalls, 1);
+            expectEquals (child.numComponentPaintedCalls, 2);
+        });
+
+        testCase ("Recursive paint calls in a component cached to an image, "
+                  "trigger additional componentPainted callbacks when writing to the cache", [&]
+        {
+            TestComponent parent;
+            RecursiveTestComponent child;
+
+            const Rectangle<int> bounds { 0, 0, 100, 100 };
+            parent.setBounds (bounds);
+            child.setBounds (bounds);
+
+            parent.addAndMakeVisible (child);
+
+            child.setBufferedToImage (true);
+
+            paintComponentBounds (child);
+
+            expectEquals (child.numPaintCalls, 2);
+            expectEquals (child.numComponentPaintedCalls, 2);
+
+            paintComponentBounds (parent);
+
+            expectEquals (child.numPaintCalls, 2);
+            expectEquals (child.numComponentPaintedCalls, 3);
+        });
     }
 };
 

@@ -2508,7 +2508,7 @@ public:
     /** Returns the object that was set by setCachedComponentImage().
         @see setCachedComponentImage
     */
-    CachedComponentImage* getCachedComponentImage() const noexcept      { return cachedImage.get(); }
+    CachedComponentImage* getCachedComponentImage() const noexcept;
 
     /** Invalidates cached images, both in the CachedComponentImage (if any) and the image effect state. */
     void invalidateCachedImageResources();
@@ -2666,7 +2666,9 @@ private:
 
     class EffectState;
     std::unique_ptr<EffectState> effectState;
-    std::unique_ptr<CachedComponentImage> cachedImage;
+
+    class CachedComponentImageInfo;
+    std::unique_ptr<CachedComponentImageInfo> cachedImageInfo;
 
     class MouseListenerList;
     std::unique_ptr<MouseListenerList> mouseListeners;
@@ -2741,9 +2743,9 @@ private:
     void internalRepaintUnchecked (Rectangle<int>, bool);
     Component* removeChildComponent (int index, bool sendParentEvents, bool sendChildEvents);
     void reorderChildInternal (int sourceIndex, int destIndex);
-    void paintEntireComponent (Graphics&, bool, OpaqueLayer&);
-    void paintComponentAndChildren (Graphics&, OpaqueLayer&);
-    void paintWithinParentContext (Graphics&, OpaqueLayer&);
+    void paintEntireComponent (Graphics&, bool, OpaqueLayer&, ComponentPaintDiagnostics&);
+    void paintComponentAndChildren (Graphics&, OpaqueLayer&, ComponentPaintDiagnostics&);
+    void paintWithinParentContext (Graphics&, OpaqueLayer&, ComponentPaintDiagnostics&);
     void sendMovedResizedMessages (bool wasMoved, bool wasResized);
     void sendMovedResizedMessagesIfPending();
     void repaintParent();
