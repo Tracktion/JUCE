@@ -40,17 +40,6 @@
 namespace juce
 {
 
-class Component::CachedComponentImageInfo
-{
-public:
-    explicit CachedComponentImageInfo (std::unique_ptr<CachedComponentImage> newCachedImage)
-        : cachedImage (std::move (newCachedImage))
-    {}
-
-    std::unique_ptr<CachedComponentImage> cachedImage{};
-    ComponentPaintDiagnostics* currentDiagnostics{};
-};
-
 static Component* findFirstEnabledAncestor (Component* in)
 {
     if (in == nullptr)
@@ -172,17 +161,18 @@ public:
     {
         const auto callListeners = [&] (auto& parentComp, const auto findNumListeners)
         {
-            if (auto* list = parentComp.mouseListeners.get())
+            if (parentComp.componentData == nullptr)
+                return true;
+
+            const auto& list = parentComp.componentData->mouseListeners;
+            const WeakReference safePointer { &parentComp };
+
+            for (int i = findNumListeners (list); --i >= 0; i = jmin (i, findNumListeners (list)))
             {
-                const WeakReference safePointer { &parentComp };
+                (list.listeners.getUnchecked (i)->*eventMethod) (checker.eventWithNearestParent(), params...);
 
-                for (int i = findNumListeners (*list); --i >= 0; i = jmin (i, findNumListeners (*list)))
-                {
-                    (list->listeners.getUnchecked (i)->*eventMethod) (checker.eventWithNearestParent(), params...);
-
-                    if (checker.shouldBailOut() || safePointer == nullptr)
-                        return false;
-                }
+                if (checker.shouldBailOut() || safePointer == nullptr)
+                    return false;
             }
 
             return true;
@@ -274,6 +264,35 @@ private:
     Image effectImage;
     ImageEffectFilter* effect;
 };
+
+class Component::Data
+{
+public:
+    std::unique_ptr<Positioner> positioner;
+    AffineTransform affineTransform;
+    std::unique_ptr<EffectState> effectState;
+    MouseListenerList mouseListeners;
+    Array<KeyListener*> keyListeners;
+    ComponentPaintDiagnostics* currentDiagnostics{};
+    std::unique_ptr<CachedComponentImage> cachedImage{};
+    std::unique_ptr<AccessibilityHandler> accessibilityHandler;
+};
+
+auto Component::createDataIfNeeded() -> Data&
+{
+    if (componentData == nullptr)
+        componentData = std::make_unique<Data>();
+
+    return *componentData;
+}
+
+const Array<KeyListener*>* Component::getKeyListeners() const
+{
+    if (auto* x = componentData.get())
+        return &x->keyListeners;
+
+    return nullptr;
+}
 
 //==============================================================================
 class Component::OpaqueLayer
@@ -796,54 +815,46 @@ bool Component::isOpaque() const noexcept
 //==============================================================================
 void Component::setCachedComponentImage (CachedComponentImage* newCachedImage)
 {
-    if (newCachedImage == nullptr)
-    {
-        if (cachedImageInfo == nullptr)
-            return;
+    auto& cachedImage = createDataIfNeeded().cachedImage;
 
-        cachedImageInfo.reset();
-        repaint();
-        return;
-    }
-
-    if (cachedImageInfo != nullptr && cachedImageInfo->cachedImage.get() == newCachedImage)
+    if (newCachedImage == cachedImage.get())
         return;
 
-    cachedImageInfo = std::make_unique<CachedComponentImageInfo> (std::unique_ptr<CachedComponentImage> { newCachedImage });
+    cachedImage = std::unique_ptr<CachedComponentImage> { newCachedImage };
     repaint();
 }
 
 CachedComponentImage* Component::getCachedComponentImage() const noexcept
 {
-    return cachedImageInfo == nullptr ? nullptr : cachedImageInfo->cachedImage.get();
+    return componentData != nullptr ? componentData->cachedImage.get() : nullptr;
 }
 
 void Component::setBufferedToImage (bool shouldBeBuffered)
 {
+    auto& cachedImage = createDataIfNeeded().cachedImage;
+
     // This assertion means that this component is already using a custom CachedComponentImage,
     // so by calling setBufferedToImage, you'll be deleting the custom one - this is almost certainly
     // not what you wanted to happen... If you really do know what you're doing here, and want to
     // avoid this assertion, just call setCachedComponentImage (nullptr) before setBufferedToImage().
-    jassert (cachedImageInfo == nullptr || dynamic_cast<detail::StandardCachedComponentImage*> (cachedImageInfo->cachedImage.get()) != nullptr);
+    jassert (dynamic_cast<detail::StandardCachedComponentImage*> (cachedImage.get()) != nullptr);
 
     if (shouldBeBuffered)
-    {
-        if (cachedImageInfo == nullptr)
-            cachedImageInfo = std::make_unique<CachedComponentImageInfo> (std::make_unique<detail::StandardCachedComponentImage> (*this));
-    }
+        cachedImage = std::make_unique<detail::StandardCachedComponentImage> (*this);
     else
-    {
-        cachedImageInfo.reset();
-    }
+        cachedImage.reset();
 }
 
 void Component::invalidateCachedImageResources()
 {
-    if (cachedImageInfo != nullptr)
-        cachedImageInfo->cachedImage->releaseResources();
+    if (componentData == nullptr)
+        return;
 
-    if (effectState != nullptr)
-        effectState->releaseResources();
+    if (componentData->cachedImage != nullptr)
+        componentData->cachedImage->releaseResources();
+
+    if (componentData->effectState != nullptr)
+        componentData->effectState->releaseResources();
 }
 
 //==============================================================================
@@ -1094,9 +1105,9 @@ void Component::setBounds (int x, int y, int w, int h)
             else if (! flags.hasHeavyweightPeerFlag)
                 repaintParent();
         }
-        else if (cachedImageInfo != nullptr)
+        else if (componentData != nullptr && componentData->cachedImage != nullptr)
         {
-            cachedImageInfo->cachedImage->invalidateAll();
+            componentData->cachedImage->invalidateAll();
         }
 
         flags.isMoveCallbackPending = wasMoved;
@@ -1252,44 +1263,25 @@ void Component::setBoundsToFit (Rectangle<int> targetArea, Justification justifi
 //==============================================================================
 void Component::setTransform (const AffineTransform& newTransform)
 {
-    // If you pass in a transform with no inverse, the component will have no dimensions,
-    // and there will be all sorts of maths errors when converting coordinates.
-    jassert (! newTransform.isSingularity());
+    auto& affineTransform = createDataIfNeeded().affineTransform;
 
-    if (newTransform.isIdentity())
-    {
-        if (affineTransform != nullptr)
-        {
-            repaint();
-            affineTransform.reset();
-            repaint();
-            sendMovedResizedMessages (false, false);
-        }
-    }
-    else if (affineTransform == nullptr)
-    {
-        repaint();
-        affineTransform.reset (new AffineTransform (newTransform));
-        repaint();
-        sendMovedResizedMessages (false, false);
-    }
-    else if (*affineTransform != newTransform)
-    {
-        repaint();
-        *affineTransform = newTransform;
-        repaint();
-        sendMovedResizedMessages (false, false);
-    }
+    if (affineTransform == newTransform)
+        return;
+
+    repaint();
+    affineTransform = newTransform;
+    repaint();
+    sendMovedResizedMessages (false, false);
 }
 
 bool Component::isTransformed() const noexcept
 {
-    return affineTransform != nullptr;
+    return componentData != nullptr && ! componentData->affineTransform.isIdentity();
 }
 
 AffineTransform Component::getTransform() const
 {
-    return affineTransform != nullptr ? *affineTransform : AffineTransform();
+    return componentData != nullptr ? componentData->affineTransform : AffineTransform();
 }
 
 float Component::getApproximateScaleFactorForComponent (const Component* targetComponent)
@@ -1878,9 +1870,9 @@ void Component::internalRepaintUnchecked (Rectangle<int> area, bool isEntireComp
 
     if (flags.visibleFlag)
     {
-        if (cachedImageInfo != nullptr)
-            if (! (isEntireComponent ? cachedImageInfo->cachedImage->invalidateAll()
-                                     : cachedImageInfo->cachedImage->invalidate (area)))
+        if (componentData != nullptr && componentData->cachedImage != nullptr)
+            if (! (isEntireComponent ? componentData->cachedImage->invalidateAll()
+                                     : componentData->cachedImage->invalidate (area)))
                 return;
 
         if (area.isEmpty())
@@ -1895,7 +1887,7 @@ void Component::internalRepaintUnchecked (Rectangle<int> area, bool isEntireComp
                 auto scaled = area * Point<float> ((float) peerBounds.getWidth()  / (float) getWidth(),
                                                    (float) peerBounds.getHeight() / (float) getHeight());
 
-                peer->repaint (affineTransform != nullptr ? scaled.transformedBy (*affineTransform) : scaled);
+                peer->repaint (isTransformed() ? scaled.transformedBy (componentData->affineTransform) : scaled);
             }
         }
         else
@@ -1924,7 +1916,7 @@ void Component::paintWithinParentContext (Graphics& g, OpaqueLayer& opaqueLayer,
 {
     g.setOrigin (getPosition());
 
-    if (cachedImageInfo == nullptr)
+    if (componentData == nullptr || componentData->cachedImage == nullptr)
     {
         paintEntireComponent (g, false, opaqueLayer, diagnostics);
         return;
@@ -1932,10 +1924,10 @@ void Component::paintWithinParentContext (Graphics& g, OpaqueLayer& opaqueLayer,
 
     opaqueLayer.removeOpaqueComponentAndChildren (*this);
 
-    const ScopedValueSetter scopedDiagnostics { cachedImageInfo->currentDiagnostics, &diagnostics };
+    const ScopedValueSetter scopedDiagnostics { componentData->currentDiagnostics, &diagnostics };
 
-    cachedImageInfo->currentDiagnostics->readFromCache = true;
-    cachedImageInfo->cachedImage->paint (g);
+    componentData->currentDiagnostics->readFromCache = true;
+    componentData->cachedImage->paint (g);
 }
 
 void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer, ComponentPaintDiagnostics& diagnostics)
@@ -1985,8 +1977,8 @@ void Component::paintComponentAndChildren (Graphics& g, OpaqueLayer& opaqueLayer
         {
             Graphics::ScopedSaveState ss (g);
 
-            if (auto& transform = child->affineTransform)
-                g.addTransform (*transform);
+            if (child->isTransformed())
+                g.addTransform (child->componentData->affineTransform);
 
             child->paintWithinParentContext (g, opaqueLayer, childDiagnostics);
         }
@@ -2033,13 +2025,13 @@ void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel)
     // we can use them as flags to detect if we are already reading from or
     // writing to a cache.
 
-    if (cachedImageInfo != nullptr
-        && cachedImageInfo->currentDiagnostics != nullptr
-        && cachedImageInfo->currentDiagnostics->readFromCache
-        && ! cachedImageInfo->currentDiagnostics->wroteToCache)
+    if (componentData != nullptr
+        && componentData->currentDiagnostics != nullptr
+        && componentData->currentDiagnostics->readFromCache
+        && ! componentData->currentDiagnostics->wroteToCache)
     {
-        cachedImageInfo->currentDiagnostics->wroteToCache = true;
-        paintEntireComponent (g, ignoreAlphaLevel, opaqueLayer, *cachedImageInfo->currentDiagnostics);
+        componentData->currentDiagnostics->wroteToCache = true;
+        paintEntireComponent (g, ignoreAlphaLevel, opaqueLayer, *componentData->currentDiagnostics);
         return;
     }
 
@@ -2068,9 +2060,9 @@ void Component::paintEntireComponent (Graphics& g, bool ignoreAlphaLevel, Opaque
     flags.isInsidePaintCall = true;
    #endif
 
-    if (effectState != nullptr)
+    if (componentData != nullptr && componentData->effectState != nullptr)
     {
-        effectState->paint (g, *this, ignoreAlphaLevel, opaqueLayer, diagnostics);
+        componentData->effectState->paint (g, *this, ignoreAlphaLevel, opaqueLayer, diagnostics);
     }
     else if (componentTransparency > 0 && ! ignoreAlphaLevel)
     {
@@ -2140,15 +2132,19 @@ Image Component::createComponentSnapshot (Rectangle<int> areaToGrab,
 
 ImageEffectFilter* Component::getComponentEffect() const noexcept
 {
-    return effectState != nullptr ? &effectState->getEffect() : nullptr;
+    return componentData != nullptr
+        && componentData->effectState != nullptr ? &componentData->effectState->getEffect()
+                                                 : nullptr;
 }
 
 void Component::setComponentEffect (ImageEffectFilter* newEffect)
 {
+    auto& effectState = createDataIfNeeded().effectState;
+
     if (newEffect == nullptr && effectState == nullptr)
         return;
 
-    const auto needsRepaint = [&]
+    const auto needsRepaint = std::invoke ([&]
     {
         if (newEffect == nullptr)
         {
@@ -2163,7 +2159,7 @@ void Component::setComponentEffect (ImageEffectFilter* newEffect)
         }
 
         return effectState->setEffect (*newEffect);
-    }();
+    });
 
     if (needsRepaint)
         repaint();
@@ -2274,14 +2270,14 @@ Component::Positioner::Positioner (Component& c) noexcept  : component (c)
 
 Component::Positioner* Component::getPositioner() const noexcept
 {
-    return positioner.get();
+    return componentData != nullptr ? componentData->positioner.get() : nullptr;
 }
 
 void Component::setPositioner (Positioner* newPositioner)
 {
     // You can only assign a positioner to the component that it was created for!
     jassert (newPositioner == nullptr || this == &(newPositioner->getComponent()));
-    positioner.reset (newPositioner);
+    createDataIfNeeded().positioner.reset (newPositioner);
 }
 
 //==============================================================================
@@ -2292,8 +2288,8 @@ Rectangle<int> Component::getLocalBounds() const noexcept
 
 Rectangle<int> Component::getBoundsInParent() const noexcept
 {
-    return affineTransform == nullptr ? boundsRelativeToParent
-                                      : boundsRelativeToParent.transformedBy (*affineTransform);
+    return isTransformed() ? boundsRelativeToParent.transformedBy (componentData->affineTransform)
+                           : boundsRelativeToParent;
 }
 
 //==============================================================================
@@ -2389,10 +2385,7 @@ void Component::addMouseListener (MouseListener* newListener,
     // twice - once via the direct callback that all components get anyway, and then again as a listener!
     jassert ((newListener != this) || wantsEventsForAllNestedChildComponents);
 
-    if (mouseListeners == nullptr)
-        mouseListeners.reset (new MouseListenerList());
-
-    mouseListeners->addListener (newListener, wantsEventsForAllNestedChildComponents);
+    createDataIfNeeded().mouseListeners.addListener (newListener, wantsEventsForAllNestedChildComponents);
 }
 
 void Component::removeMouseListener (MouseListener* listenerToRemove)
@@ -2401,8 +2394,8 @@ void Component::removeMouseListener (MouseListener* listenerToRemove)
     // thread, you'll need to use a MessageManagerLock object to make sure it's thread-safe.
     JUCE_ASSERT_MESSAGE_MANAGER_IS_LOCKED
 
-    if (mouseListeners != nullptr)
-        mouseListeners->removeListener (listenerToRemove);
+    if (componentData != nullptr)
+        componentData->mouseListeners.removeListener (listenerToRemove);
 }
 
 //==============================================================================
@@ -3233,16 +3226,13 @@ Point<int> Component::getMouseXYRelative() const
 //==============================================================================
 void Component::addKeyListener (KeyListener* newListener)
 {
-    if (keyListeners == nullptr)
-        keyListeners.reset (new Array<KeyListener*>());
-
-    keyListeners->addIfNotAlreadyThere (newListener);
+    createDataIfNeeded().keyListeners.addIfNotAlreadyThere (newListener);
 }
 
 void Component::removeKeyListener (KeyListener* listenerToRemove)
 {
-    if (keyListeners != nullptr)
-        keyListeners->removeFirstMatchingValue (listenerToRemove);
+    if (componentData != nullptr)
+        componentData->keyListeners.removeFirstMatchingValue (listenerToRemove);
 }
 
 bool Component::keyPressed (const KeyPress&)            { return false; }
@@ -3314,13 +3304,16 @@ std::unique_ptr<AccessibilityHandler> Component::createIgnoredAccessibilityHandl
 
 void Component::invalidateAccessibilityHandler()
 {
-    accessibilityHandler = nullptr;
+    if (componentData != nullptr)
+        componentData->accessibilityHandler = nullptr;
 }
 
 AccessibilityHandler* Component::getAccessibilityHandler()
 {
     if (! isAccessible() || getWindowHandle() == nullptr)
         return nullptr;
+
+    auto& accessibilityHandler = createDataIfNeeded().accessibilityHandler;
 
     if (accessibilityHandler == nullptr
         || accessibilityHandler->getTypeIndex() != std::type_index (typeid (*this)))
