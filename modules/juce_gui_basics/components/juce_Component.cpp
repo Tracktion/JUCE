@@ -831,18 +831,25 @@ CachedComponentImage* Component::getCachedComponentImage() const noexcept
 
 void Component::setBufferedToImage (bool shouldBeBuffered)
 {
-    auto& cachedImage = createDataIfNeeded().cachedImage;
+    // This assertion means that this component is already using a custom
+    // CachedComponentImage, so by calling setBufferedToImage, you'll be
+    // deleting the custom one - this is almost certainly not what you wanted
+    // to happen. If you really do know what you're doing here, and want to
+    // avoid this assertion, just call setCachedComponentImage (nullptr) before
+    // setBufferedToImage().
 
-    // This assertion means that this component is already using a custom CachedComponentImage,
-    // so by calling setBufferedToImage, you'll be deleting the custom one - this is almost certainly
-    // not what you wanted to happen... If you really do know what you're doing here, and want to
-    // avoid this assertion, just call setCachedComponentImage (nullptr) before setBufferedToImage().
-    jassert (dynamic_cast<detail::StandardCachedComponentImage*> (cachedImage.get()) != nullptr);
+    jassert (componentData == nullptr
+             || componentData->cachedImage.get() == nullptr
+             || dynamic_cast<detail::StandardCachedComponentImage*> (componentData->cachedImage.get()) != nullptr);
 
     if (shouldBeBuffered)
-        cachedImage = std::make_unique<detail::StandardCachedComponentImage> (*this);
-    else
-        cachedImage.reset();
+    {
+        createDataIfNeeded().cachedImage = std::make_unique<detail::StandardCachedComponentImage> (*this);
+    }
+    else if (componentData != nullptr)
+    {
+        componentData->cachedImage.reset();
+    }
 }
 
 void Component::invalidateCachedImageResources()
