@@ -154,10 +154,7 @@ bool Thread::createNativeThread (Priority priority)
 
         data.started.set_value (true);
 
-        JUCE_AUTORELEASEPOOL
-        {
-            juce_threadEntryPoint (&thread);
-        }
+        juce_threadEntryPoint (&thread);
 
         return nullptr;
     });
