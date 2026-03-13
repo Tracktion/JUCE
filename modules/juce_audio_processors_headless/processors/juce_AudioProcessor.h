@@ -514,8 +514,8 @@ public:
         AudioProcessor& owner;
         String name;
         AudioChannelSet layout, dfltLayout, lastLayout;
-        bool enabledByDefault;
-        int cachedChannelCount;
+        bool enabledByDefault = false;
+        int cachedChannelCount = 0;
 
         JUCE_DECLARE_NON_COPYABLE (Bus)
     };
