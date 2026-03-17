@@ -814,7 +814,7 @@ public:
 
         if (editorComp == nullptr)
         {
-            if (auto* ed = processor->createEditorIfNeeded())
+            if (auto* ed = processor->createEditorAndMakeActive())
             {
                 setHasEditorFlag (true);
                 editorComp.reset (new EditorCompWrapper (*this, *ed));

@@ -1018,7 +1018,9 @@ public:
 
         @see hasEditor
     */
+private:
     virtual AudioProcessorEditor* createEditor() = 0;
+public:
 
     /** Your processor subclass must override this and return true if it can create an
         editor component.
@@ -1039,10 +1041,21 @@ public:
     */
     AudioProcessorEditor* getActiveEditor() const noexcept;
 
-    /** Returns the active editor, or if there isn't one, it will create one.
-        This may call createEditor() internally to create the component.
+    /** If there's no active editor, creates a new editor and stores it as the active editor
+        before returning it. Otherwise, returns nullptr.
+
+        You must use this instead of calling createEditor() directly if you
+        want calls to getActiveEditor() to work as expected.
     */
-    AudioProcessorEditor* createEditorIfNeeded();
+    AudioProcessorEditor* createEditorAndMakeActive();
+
+    /** @internal
+
+        This function is deprecated, as its name is misleading.
+        Prefer createEditorAndMakeActive().
+    */
+    [[deprecated ("Prefer createEditorAndMakeActive()")]]
+    AudioProcessorEditor* createEditorIfNecessary() { return createEditorAndMakeActive(); }
 
     //==============================================================================
     /** Returns the default number of steps for a parameter.

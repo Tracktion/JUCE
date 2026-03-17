@@ -2293,7 +2293,7 @@ private:
 
             void createEditor (AudioProcessor& plugin)
             {
-                pluginEditor.reset (plugin.createEditorIfNeeded());
+                pluginEditor.reset (plugin.createEditorAndMakeActive());
 
                #if JucePlugin_Enable_ARA
                 jassert (dynamic_cast<AudioProcessorEditorARAExtension*> (pluginEditor.get()) != nullptr);
@@ -2319,7 +2319,7 @@ private:
                 }
                 else
                 {
-                    // if hasEditor() returns true then createEditorIfNeeded has to return a valid editor
+                    // if hasEditor() returns true then createEditor() has to return a valid editor
                     jassertfalse;
                 }
             }
