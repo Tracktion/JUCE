@@ -334,39 +334,35 @@ static void checkForPointerAPI()
 }
 
 //==============================================================================
-using GetSystemMetricsForDpiFunc               = int                   (WINAPI*) (int, UINT);
-
-static bool hasCheckedForDPIAwareness = false;
-
-static void loadDPIAwarenessFunctions()
+static bool setDPIAwareness()
 {
-    constexpr auto shcore = "SHCore.dll";
-    LoadLibraryA (shcore);
-    const auto shcoreModule = GetModuleHandleA (shcore);
+    static const auto didSetDpiAwareness = std::invoke ([]
+    {
+        constexpr auto shcore = "SHCore.dll";
+        LoadLibraryA (shcore);
 
-    if (shcoreModule == nullptr)
-        return;
-}
+        const auto shcoreModule = GetModuleHandleA (shcore);
 
-static void setDPIAwareness()
-{
-    if (hasCheckedForDPIAwareness)
-        return;
+        if (shcoreModule == nullptr)
+            return false;
 
-    hasCheckedForDPIAwareness = true;
+        using SetProcessDpiAwarenessContextFunc = BOOL (WINAPI*) (DPI_AWARENESS_CONTEXT);
+        const auto setProcessDpiAwarenessContext = (SetProcessDpiAwarenessContextFunc) GetProcAddress (shcoreModule, "SetProcessDpiAwarenessContext");
 
-    loadDPIAwarenessFunctions();
+        if (setProcessDpiAwarenessContext != nullptr
+            && setProcessDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+            return true;
 
-    if (SetProcessDpiAwarenessContext (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
-        return;
+        if (SUCCEEDED (SetProcessDpiAwareness (PROCESS_PER_MONITOR_DPI_AWARE)))
+            return true;
 
-    if (SUCCEEDED (SetProcessDpiAwareness (PROCESS_PER_MONITOR_DPI_AWARE)))
-        return;
+        if (SUCCEEDED (SetProcessDpiAwareness (PROCESS_SYSTEM_DPI_AWARE)))
+            return true;
 
-    if (SUCCEEDED (SetProcessDpiAwareness (PROCESS_SYSTEM_DPI_AWARE)))
-        return;
+        return SetProcessDPIAware() != 0;
+    });
 
-    SetProcessDPIAware();
+    return didSetDpiAwareness;
 }
 
 static bool isPerMonitorDPIAwareProcess()
