@@ -2768,28 +2768,51 @@ private:
 
         const auto signTarget = [&]
         {
-            const auto script = ScriptBuilder{}
-                .echo ("Signing Identity:\t${EXPANDED_CODE_SIGN_IDENTITY_NAME:-${CODE_SIGN_IDENTITY}}")
-                .insertLine()
-                .set ("entitlementsFile", "${TARGET_TEMP_DIR}/${FULL_PRODUCT_NAME}.xcent")
-                .insertLine()
-                .ifThen ("! -f \"${entitlementsFile}\"", ScriptBuilder{}
-                    .set ("entitlementsFile", "")
+            ScriptBuilder script;
+
+            script.echo ("Signing Identity:\t${EXPANDED_CODE_SIGN_IDENTITY_NAME:-${CODE_SIGN_IDENTITY}}")
+                  .insertLine()
+                  .set ("entitlementsFile", "${TARGET_TEMP_DIR}/${FULL_PRODUCT_NAME}.xcent")
+                  .insertLine()
+                  .ifThen ("! -f \"${entitlementsFile}\"", ScriptBuilder{}
+                      .set ("entitlementsFile", "")
+                      .toString())
+                  .echo ("Entitlements File:\t${entitlementsFile:-None}")
+                  .echo();
+
+            // Stripping on recent toolchains (Xcode 16.3+) invalidates the code
+            // signatures of any embedded app extensions, and a shallow sign of the
+            // host bundle does not repair them, so the "--verify --deep" below
+            // fails. Re-sign each embedded .appex bottom-up first, preserving its
+            // own entitlements - a top-level "--deep" sign would instead clobber
+            // them with the host's. The "-d" guard makes this a no-op for targets
+            // without a Contents/PlugIns folder.
+            script.loop ("appex", doubleQuoted ("${CODESIGNING_FOLDER_PATH}/Contents/PlugIns") + "/*.appex", ScriptBuilder{}
+                .ifThen ("-d " + doubleQuoted ("${appex}"), ScriptBuilder{}
+                    .run ("codesign",
+                          "--force",
+                          "--sign", doubleQuoted ("${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY}}"),
+                          "--verbose=4",
+                          "--timestamp",
+                          target.shouldUseHardenedRuntime() ? "-o runtime" : "",
+                          "--preserve-metadata=identifier,entitlements,flags",
+                          "--generate-entitlement-der",
+                          doubleQuoted ("${appex}"))
                     .toString())
-                .echo ("Entitlements File:\t${entitlementsFile:-None}")
-                .echo()
-                .run ("codesign",
-                      "--force",
-                      "--sign", doubleQuoted ("${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY}}"),
-                      "--verbose=4",
-                      "--timestamp",
-                      target.shouldUseHardenedRuntime() ? "-o runtime" : "",
-                      "${entitlementsFile:+--entitlements \"${entitlementsFile}\"}",
-                      "--generate-entitlement-der",
-                      doubleQuoted ("${CODESIGNING_FOLDER_PATH}"))
-                .echo()
-                .run ("codesign", "--verify", "--deep", "--verbose=4",
-                      doubleQuoted ("${CODESIGNING_FOLDER_PATH}"));
+                .toString());
+
+            script.run ("codesign",
+                        "--force",
+                        "--sign", doubleQuoted ("${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY}}"),
+                        "--verbose=4",
+                        "--timestamp",
+                        target.shouldUseHardenedRuntime() ? "-o runtime" : "",
+                        "${entitlementsFile:+--entitlements \"${entitlementsFile}\"}",
+                        "--generate-entitlement-der",
+                        doubleQuoted ("${CODESIGNING_FOLDER_PATH}"))
+                  .echo()
+                  .run ("codesign", "--verify", "--deep", "--verbose=4",
+                        doubleQuoted ("${CODESIGNING_FOLDER_PATH}"));
 
             target.addShellScriptBuildPhase ("Sign Target", script.toStringWithDefaultShellOptions());
         };
