@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -195,6 +195,11 @@ void Project::updateTitleDependencies()
     pluginARACompatibleArchiveIDsValue.setDefault (getDefaultARACompatibleArchiveIDs());
 }
 
+void Project::updateVersionDependencies()
+{
+    pluginARAArchiveIDValue.setDefault (getDefaultARADocumentArchiveID());
+}
+
 String Project::getDocumentTitle()
 {
     return getProjectNameString();
@@ -218,6 +223,9 @@ void Project::updateWebsiteDependencies()
 void Project::updateProjectSettings()
 {
     projectRoot.setProperty (Ids::name, getDocumentTitle(), nullptr);
+
+    if (shouldEnableARA())
+        projectRoot.setProperty (Ids::araDocumentArchiveID, getARADocumentArchiveIDString(), nullptr);
 }
 
 bool Project::setCppVersionFromOldExporterSettings()
@@ -374,7 +382,7 @@ void Project::initialiseAudioPluginValues()
     pluginVST3CategoryValue.referTo          (projectRoot, Ids::pluginVST3Category,         getUndoManager(), getDefaultVST3Categories(), ",");
     pluginAAXCategoryValue.referTo           (projectRoot, Ids::pluginAAXCategory,          getUndoManager(), getDefaultAAXCategories(),  ",");
 
-    pluginEnableARA.referTo                  (projectRoot, Ids::enableARA,                  getUndoManager(),  shouldEnableARA(), ",");
+    pluginEnableARA.referTo                  (projectRoot, Ids::enableARA,                  getUndoManager(), shouldEnableARA(), ",");
     pluginARAAnalyzableContentValue.referTo  (projectRoot, Ids::pluginARAAnalyzableContent, getUndoManager(), getDefaultARAContentTypes(), ",");
     pluginARATransformFlagsValue.referTo     (projectRoot, Ids::pluginARATransformFlags,    getUndoManager(), getDefaultARATransformationFlags(), ",");
     pluginARACompatibleArchiveIDsValue.referTo (projectRoot, Ids::araCompatibleArchiveIDs,  getUndoManager(), getDefaultARACompatibleArchiveIDs());
@@ -1145,6 +1153,10 @@ void Project::valueTreePropertyChanged (ValueTree& tree, const Identifier& prope
         if (property == Ids::name)
         {
             updateTitleDependencies();
+        }
+        else if (property == Ids::version)
+        {
+            updateVersionDependencies();
         }
         else if (property == Ids::companyName)
         {

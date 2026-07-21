@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -285,54 +285,78 @@ struct ScopedDeviceContext
 #endif
 
 //==============================================================================
-using RegisterTouchWindowFunc    = BOOL (WINAPI*) (HWND, ULONG);
-using GetTouchInputInfoFunc      = BOOL (WINAPI*) (HTOUCHINPUT, UINT, TOUCHINPUT*, int);
-using CloseTouchInputHandleFunc  = BOOL (WINAPI*) (HTOUCHINPUT);
-using GetGestureInfoFunc         = BOOL (WINAPI*) (HGESTUREINFO, GESTUREINFO*);
-
-static RegisterTouchWindowFunc   registerTouchWindow   = nullptr;
-static GetTouchInputInfoFunc     getTouchInputInfo     = nullptr;
-static CloseTouchInputHandleFunc closeTouchInputHandle = nullptr;
-static GetGestureInfoFunc        getGestureInfo        = nullptr;
-
-static bool hasCheckedForMultiTouch = false;
-
-static bool canUseMultiTouch()
+struct TouchFunctions
 {
-    if (registerTouchWindow == nullptr && ! hasCheckedForMultiTouch)
+    static std::optional<TouchFunctions> get()
     {
-        hasCheckedForMultiTouch = true;
+        static const auto result = std::invoke ([]() -> std::optional<TouchFunctions>
+        {
+            const TouchFunctions touchFunctions;
 
-        registerTouchWindow   = (RegisterTouchWindowFunc)   getUser32Function ("RegisterTouchWindow");
-        getTouchInputInfo     = (GetTouchInputInfoFunc)     getUser32Function ("GetTouchInputInfo");
-        closeTouchInputHandle = (CloseTouchInputHandleFunc) getUser32Function ("CloseTouchInputHandle");
-        getGestureInfo        = (GetGestureInfoFunc)        getUser32Function ("GetGestureInfo");
+            if (touchFunctions.registerTouchWindow == nullptr
+                || touchFunctions.unregisterTouchWindow == nullptr
+                || touchFunctions.getTouchInputInfo == nullptr
+                || touchFunctions.closeTouchInputHandle == nullptr
+                || touchFunctions.getGestureInfo == nullptr)
+            {
+                return {};
+            }
+
+            return touchFunctions;
+        });
+
+        return result;
     }
 
-    return registerTouchWindow != nullptr;
-}
+    using RegisterTouchWindowFunc    = BOOL (WINAPI*) (HWND, ULONG);
+    using UnregisterTouchWindowFunc  = BOOL (WINAPI*) (HWND);
+    using GetTouchInputInfoFunc      = BOOL (WINAPI*) (HTOUCHINPUT, UINT, TOUCHINPUT*, int);
+    using CloseTouchInputHandleFunc  = BOOL (WINAPI*) (HTOUCHINPUT);
+    using GetGestureInfoFunc         = BOOL (WINAPI*) (HGESTUREINFO, GESTUREINFO*);
+
+    RegisterTouchWindowFunc   registerTouchWindow   = (RegisterTouchWindowFunc) getUser32Function ("RegisterTouchWindow");
+    UnregisterTouchWindowFunc unregisterTouchWindow = (UnregisterTouchWindowFunc) getUser32Function ("UnregisterTouchWindow");
+    GetTouchInputInfoFunc     getTouchInputInfo     = (GetTouchInputInfoFunc) getUser32Function ("GetTouchInputInfo");
+    CloseTouchInputHandleFunc closeTouchInputHandle = (CloseTouchInputHandleFunc) getUser32Function ("CloseTouchInputHandle");
+    GetGestureInfoFunc        getGestureInfo        = (GetGestureInfoFunc) getUser32Function ("GetGestureInfo");
+
+private:
+    TouchFunctions() = default;
+};
 
 //==============================================================================
-using GetPointerTypeFunc       =  BOOL (WINAPI*) (UINT32, POINTER_INPUT_TYPE*);
-using GetPointerTouchInfoFunc  =  BOOL (WINAPI*) (UINT32, POINTER_TOUCH_INFO*);
-using GetPointerPenInfoFunc    =  BOOL (WINAPI*) (UINT32, POINTER_PEN_INFO*);
-
-static GetPointerTypeFunc      getPointerTypeFunction = nullptr;
-static GetPointerTouchInfoFunc getPointerTouchInfo    = nullptr;
-static GetPointerPenInfoFunc   getPointerPenInfo      = nullptr;
-
-static bool canUsePointerAPI = false;
-
-static void checkForPointerAPI()
+struct PointerFunctions
 {
-    getPointerTypeFunction = (GetPointerTypeFunc)      getUser32Function ("GetPointerType");
-    getPointerTouchInfo    = (GetPointerTouchInfoFunc) getUser32Function ("GetPointerTouchInfo");
-    getPointerPenInfo      = (GetPointerPenInfoFunc)   getUser32Function ("GetPointerPenInfo");
+    static std::optional<PointerFunctions> get()
+    {
+        static const auto result = std::invoke ([]() -> std::optional<PointerFunctions>
+        {
+            const PointerFunctions pointerFunctions;
 
-    canUsePointerAPI = (getPointerTypeFunction != nullptr
-                     && getPointerTouchInfo    != nullptr
-                     && getPointerPenInfo      != nullptr);
-}
+            if (pointerFunctions.getPointerType == nullptr
+                || pointerFunctions.getPointerTouchInfo == nullptr
+                || pointerFunctions.getPointerPenInfo == nullptr)
+            {
+                return {};
+            }
+
+            return pointerFunctions;
+        });
+
+        return result;
+    }
+
+    using GetPointerTypeFunc       =  BOOL (WINAPI*) (UINT32, POINTER_INPUT_TYPE*);
+    using GetPointerTouchInfoFunc  =  BOOL (WINAPI*) (UINT32, POINTER_TOUCH_INFO*);
+    using GetPointerPenInfoFunc    =  BOOL (WINAPI*) (UINT32, POINTER_PEN_INFO*);
+
+    GetPointerTypeFunc      getPointerType         = (GetPointerTypeFunc)      getUser32Function ("GetPointerType");
+    GetPointerTouchInfoFunc getPointerTouchInfo    = (GetPointerTouchInfoFunc) getUser32Function ("GetPointerTouchInfo");
+    GetPointerPenInfoFunc   getPointerPenInfo      = (GetPointerPenInfoFunc)   getUser32Function ("GetPointerPenInfo");
+
+private:
+    PointerFunctions() = default;
+};
 
 //==============================================================================
 static inline bool isPerMonitorDPIAwareWindow ([[maybe_unused]] HWND nativeWindow)
@@ -1295,7 +1319,7 @@ public:
 
     std::optional<BorderSize<int>> getCustomBorderSize() const
     {
-        if (hasTitleBar() || (styleFlags & windowIsTemporary) != 0 || isFullScreen())
+        if (hasTitleBar() || (getStyleFlags() & windowIsTemporary) != 0 || isFullScreen())
             return {};
 
         return BorderSize<int> { 0, 0, 0, 0 };
@@ -1531,7 +1555,7 @@ public:
     bool setAlwaysOnTop (bool alwaysOnTop) override
     {
         const bool oldDeactivate = shouldDeactivateTitleBar;
-        shouldDeactivateTitleBar = ((styleFlags & windowIsTemporary) == 0);
+        shouldDeactivateTitleBar = ((getStyleFlags() & windowIsTemporary) == 0);
 
         setWindowZOrder (hwnd, alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST);
 
@@ -1550,7 +1574,7 @@ public:
         setMinimised (false);
 
         const bool oldDeactivate = shouldDeactivateTitleBar;
-        shouldDeactivateTitleBar = ((styleFlags & windowIsTemporary) == 0);
+        shouldDeactivateTitleBar = ((getStyleFlags() & windowIsTemporary) == 0);
 
         callFunctionIfNotLocked (makeActive ? &toFrontCallback1 : &toFrontCallback2, hwnd);
 
@@ -1592,7 +1616,7 @@ public:
     void grabFocus() override
     {
         const ScopedValueSetter ignoreDismissScope (shouldIgnoreModalDismiss, true);
-        const ScopedValueSetter titlebarScope (shouldDeactivateTitleBar, (styleFlags & windowIsTemporary) == 0);
+        const ScopedValueSetter titlebarScope (shouldDeactivateTitleBar, (getStyleFlags() & windowIsTemporary) == 0);
 
         callFunctionIfNotLocked (&setFocusCallback, hwnd);
     }
@@ -1976,12 +2000,12 @@ public:
 
     DWORD computeNativeStyleFlags() const
     {
-        const auto titled = ! isKioskMode() && (styleFlags & windowHasTitleBar) != 0;
+        const auto titled = ! isKioskMode() && (getStyleFlags() & windowHasTitleBar) != 0;
         const auto usesDropShadow = windowUsesNativeShadow();
-        const auto hasClose = (styleFlags & windowHasCloseButton) != 0;
-        const auto hasMin = (styleFlags & windowHasMinimiseButton) != 0;
-        const auto hasMax = (styleFlags & windowHasMaximiseButton) != 0;
-        const auto resizable = (styleFlags & windowIsResizable) != 0;
+        const auto hasClose = (getStyleFlags() & windowHasCloseButton) != 0;
+        const auto hasMin = (getStyleFlags() & windowHasMinimiseButton) != 0;
+        const auto hasMax = (getStyleFlags() & windowHasMaximiseButton) != 0;
+        const auto resizable = (getStyleFlags() & windowIsResizable) != 0;
 
         DWORD result = WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
 
@@ -2009,7 +2033,7 @@ public:
         return result;
     }
 
-    bool hasTitleBar() const                 { return (styleFlags & windowHasTitleBar) != 0; }
+    bool hasTitleBar() const                 { return (getStyleFlags() & windowHasTitleBar) != 0; }
 
 private:
     HWND hwnd, parentToAddTo;
@@ -2180,7 +2204,7 @@ private:
             if (parentToAddTo != nullptr)
                 return 0;
 
-            const auto appearsOnTaskbar = (styleFlags & windowAppearsOnTaskbar) != 0;
+            const auto appearsOnTaskbar = (getStyleFlags() & windowAppearsOnTaskbar) != 0;
             return appearsOnTaskbar ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW;
         });
 
@@ -2188,7 +2212,7 @@ private:
                                L"", type, 0, 0, 0, 0, parentToAddTo, nullptr,
                                (HINSTANCE) Process::getCurrentModuleInstanceHandle(), nullptr);
 
-        const auto titled = (styleFlags & windowHasTitleBar) != 0;
+        const auto titled = (getStyleFlags() & windowHasTitleBar) != 0;
         const auto usesDropShadow = windowUsesNativeShadow();
 
         if (! titled && usesDropShadow)
@@ -2238,13 +2262,13 @@ private:
             RegisterDragDrop (hwnd, dropTarget);
 
             if (canUseMultiTouch())
-                registerTouchWindow (hwnd, 0);
+                TouchFunctions::get()->registerTouchWindow (hwnd, 0);
 
             HiddenMessageWindow::setDPIAwareness();
             scaleFactor = getScaleFactorForWindow (hwnd);
 
             setMessageFilter();
-            checkForPointerAPI();
+            PointerFunctions::get();
 
             // This is needed so that our plugin window gets notified of WM_SETTINGCHANGE messages
             // and can respond to display scale changes
@@ -2316,15 +2340,20 @@ private:
     {
         return ! isKioskMode()
                && (hasTitleBar()
-                   || (   (0 != (styleFlags & windowHasDropShadow))
-                       && (0 == (styleFlags & windowIsSemiTransparent))
-                       && (0 == (styleFlags & windowIsTemporary))));
+                   || (   (0 != (getStyleFlags() & windowHasDropShadow))
+                       && (0 == (getStyleFlags() & windowIsSemiTransparent))
+                       && (0 == (getStyleFlags() & windowIsTemporary))));
+    }
+
+    bool canUseMultiTouch() const
+    {
+        return usesMultitouch;
     }
 
     void updateShadower()
     {
         if (! component.isCurrentlyModal()
-            && (styleFlags & windowHasDropShadow) != 0
+            && (getStyleFlags() & windowHasDropShadow) != 0
             && ! windowUsesNativeShadow())
         {
             shadower = component.getLookAndFeel().createDropShadowerForComponent (component);
@@ -2409,25 +2438,40 @@ private:
     }
 
     //==============================================================================
-    void doMouseEvent (Point<float> position, float pressure, float orientation = 0.0f, ModifierKeys mods = ModifierKeys::currentModifiers)
+    void doMouseEvent (MouseInputSource::InputSourceType inputSourceType,
+                       Point<float> position,
+                       float pressure,
+                       float orientation = 0.0f,
+                       ModifierKeys mods = ModifierKeys::currentModifiers)
     {
-        handleMouseEvent (MouseInputSource::InputSourceType::mouse, position, mods, pressure, orientation, getMouseEventTime());
+        handleMouseEvent (inputSourceType, position, mods, pressure, orientation, getMouseEventTime());
     }
 
     StringArray getAvailableRenderingEngines() override;
     int getCurrentRenderingEngine() const override;
     void setCurrentRenderingEngine (int e) override;
 
-    bool isTouchEvent() noexcept
+    MouseInputSource::InputSourceType getInputSourceType()
     {
-        if (registerTouchWindow == nullptr)
-            return false;
-
         // Relevant info about touch/pen detection flags:
         // https://msdn.microsoft.com/en-us/library/windows/desktop/ms703320(v=vs.85).aspx
         // http://www.petertissen.de/?p=4
 
-        return ((uint32_t) GetMessageExtraInfo() & 0xFFFFFF80 /*SIGNATURE_MASK*/) == 0xFF515780 /*MI_WP_SIGNATURE*/;
+        static constexpr uint32_t signatureMaskNoPen = 0xFFFFFF80;
+        static constexpr uint32_t wpSignatureNoPen = 0xFF515780;
+
+        static constexpr uint32_t signatureMask = 0xFFFFFF00;
+        static constexpr uint32_t wpSignature = 0xFF515700;
+
+        const auto extraInfo = (uint32_t) GetMessageExtraInfo();
+
+        if ((extraInfo & signatureMaskNoPen) == wpSignatureNoPen)
+            return MouseInputSource::InputSourceType::touch;
+
+        if ((extraInfo & signatureMask) == wpSignature)
+            return MouseInputSource::InputSourceType::pen;
+
+        return MouseInputSource::InputSourceType::mouse;
     }
 
     static bool areOtherTouchSourcesActive()
@@ -2450,8 +2494,11 @@ private:
     {
         auto modsToSend = ModifierKeys::getCurrentModifiers();
 
+        const auto inputSourceType = getInputSourceType();
+        const auto isTouch = inputSourceType == MouseInputSource::InputSourceType::touch;
+
         // this will be handled by WM_TOUCH
-        if (isTouchEvent() || areOtherTouchSourcesActive())
+        if (canUseMultiTouch() && (isTouch || areOtherTouchSourcesActive()))
             return {};
 
         if (! isMouseOver)
@@ -2488,12 +2535,13 @@ private:
         auto now = Time::getMillisecondCounter();
 
         if (! Desktop::getInstance().getMainMouseSource().isDragging())
-            modsToSend = modsToSend.withoutMouseButtons();
+            if (! isTouch)
+                modsToSend = modsToSend.withoutMouseButtons();
 
         if (now >= lastMouseTime)
         {
             lastMouseTime = now;
-            doMouseEvent (position, MouseInputSource::defaultPressure,
+            doMouseEvent (inputSourceType, position, MouseInputSource::defaultPressure,
                           MouseInputSource::defaultOrientation, modsToSend);
         }
 
@@ -2558,8 +2606,11 @@ private:
 
     void doMouseDown (LPARAM lParam, const WPARAM wParam)
     {
+        const auto inputSourceType = getInputSourceType();
+        const auto isTouch = inputSourceType == MouseInputSource::InputSourceType::touch;
+
         // this will be handled by WM_TOUCH
-        if (isTouchEvent() || areOtherTouchSourcesActive())
+        if (canUseMultiTouch() && (isTouch || areOtherTouchSourcesActive()))
             return;
 
         if (GetCapture() != hwnd)
@@ -2573,7 +2624,7 @@ private:
 
             isDragging = true;
 
-            doMouseEvent (getPointFromLocalLParam (lParam), MouseInputSource::defaultPressure);
+            doMouseEvent (inputSourceType, getPointFromLocalLParam (lParam), MouseInputSource::defaultPressure);
         }
 
         // If this is the first event after receiving both a MOUSEACTIVATE and a SETFOCUS, then
@@ -2584,8 +2635,11 @@ private:
 
     void doMouseUp (Point<float> position, const WPARAM wParam, bool adjustCapture = true)
     {
+        const auto inputSourceType = getInputSourceType();
+        const auto isTouch = inputSourceType == MouseInputSource::InputSourceType::touch;
+
         // this will be handled by WM_TOUCH
-        if (isTouchEvent() || areOtherTouchSourcesActive())
+        if (canUseMultiTouch() && (isTouch || areOtherTouchSourcesActive()))
             return;
 
         updateModifiersWithMouseWParam (wParam);
@@ -2599,7 +2653,7 @@ private:
         // NB: under some circumstances (e.g. double-clicking a native title bar), a mouse-up can
         // arrive without a mouse-down, so in that case we need to avoid sending a message.
         if (wasDragging)
-            doMouseEvent (position, MouseInputSource::defaultPressure);
+            doMouseEvent (inputSourceType, position, MouseInputSource::defaultPressure);
     }
 
     void doCaptureChanged()
@@ -2653,7 +2707,7 @@ private:
         }
         else if (! areOtherTouchSourcesActive())
         {
-            doMouseEvent (getCurrentMousePos(), MouseInputSource::defaultPressure);
+            doMouseEvent (getInputSourceType(), getCurrentMousePos(), MouseInputSource::defaultPressure);
         }
     }
 
@@ -2674,11 +2728,11 @@ private:
 
     static MouseInputSource::InputSourceType getPointerType (WPARAM wParam)
     {
-        if (getPointerTypeFunction != nullptr)
+        if (auto functions = PointerFunctions::get())
         {
             POINTER_INPUT_TYPE pointerType;
 
-            if (getPointerTypeFunction (GET_POINTERID_WPARAM (wParam), &pointerType))
+            if (functions->getPointerType (GET_POINTERID_WPARAM (wParam), &pointerType))
             {
                 if (pointerType == 2)
                     return MouseInputSource::InputSourceType::touch;
@@ -2718,7 +2772,8 @@ private:
         zerostruct (gi);
         gi.cbSize = sizeof (gi);
 
-        if (getGestureInfo != nullptr && getGestureInfo ((HGESTUREINFO) lParam, &gi))
+        if (TouchFunctions::get().has_value()
+            && TouchFunctions::get()->getGestureInfo ((HGESTUREINFO) lParam, &gi))
         {
             updateKeyModifiers();
 
@@ -2749,26 +2804,30 @@ private:
 
     LRESULT doTouchEvent (const int numInputs, HTOUCHINPUT eventHandle)
     {
-        if ((styleFlags & windowIgnoresMouseClicks) != 0)
+        if ((getStyleFlags() & windowIgnoresMouseClicks) != 0)
             if (auto* parent = getOwnerOfWindow (GetParent (hwnd)))
                 if (parent != this)
                     return parent->doTouchEvent (numInputs, eventHandle);
 
         HeapBlock<TOUCHINPUT> inputInfo (numInputs);
 
-        if (getTouchInputInfo (eventHandle, (UINT) numInputs, inputInfo, sizeof (TOUCHINPUT)))
+        if (auto touchFunctions = TouchFunctions::get())
         {
-            for (int i = 0; i < numInputs; ++i)
+            if (touchFunctions->getTouchInputInfo (eventHandle, (UINT) numInputs, inputInfo, sizeof (TOUCHINPUT)))
             {
-                auto flags = inputInfo[i].dwFlags;
+                for (int i = 0; i < numInputs; ++i)
+                {
+                    auto flags = inputInfo[i].dwFlags;
 
-                if ((flags & (TOUCHEVENTF_DOWN | TOUCHEVENTF_MOVE | TOUCHEVENTF_UP)) != 0)
-                    if (! handleTouchInput (inputInfo[i], (flags & TOUCHEVENTF_DOWN) != 0, (flags & TOUCHEVENTF_UP) != 0))
-                        return 0;  // abandon method if this window was deleted by the callback
+                    if ((flags & (TOUCHEVENTF_DOWN | TOUCHEVENTF_MOVE | TOUCHEVENTF_UP)) != 0)
+                        if (! handleTouchInput (inputInfo[i], (flags & TOUCHEVENTF_DOWN) != 0, (flags & TOUCHEVENTF_UP) != 0))
+                            return 0;  // abandon method if this window was deleted by the callback
+                }
             }
+
+            touchFunctions->closeTouchInputHandle (eventHandle);
         }
 
-        closeTouchInputHandle (eventHandle);
         return 0;
     }
 
@@ -2838,7 +2897,9 @@ private:
 
     bool handlePointerInput (WPARAM wParam, LPARAM lParam, const bool isDown, const bool isUp)
     {
-        if (! canUsePointerAPI)
+        const auto pointerFunctions = PointerFunctions::get();
+
+        if (! pointerFunctions.has_value())
             return false;
 
         auto pointerType = getPointerType (wParam);
@@ -2847,7 +2908,7 @@ private:
         {
             POINTER_TOUCH_INFO touchInfo;
 
-            if (! getPointerTouchInfo (GET_POINTERID_WPARAM (wParam), &touchInfo))
+            if (! pointerFunctions->getPointerTouchInfo (GET_POINTERID_WPARAM (wParam), &touchInfo))
                 return false;
 
             const auto pressure = touchInfo.touchMask & TOUCH_MASK_PRESSURE ? static_cast<float> (touchInfo.pressure)
@@ -2855,15 +2916,18 @@ private:
             const auto orientation = touchInfo.touchMask & TOUCH_MASK_ORIENTATION ? degreesToRadians (static_cast<float> (touchInfo.orientation))
                                                                                   : MouseInputSource::defaultOrientation;
 
-            if (! handleTouchInput (emulateTouchEventFromPointer (touchInfo.pointerInfo.ptPixelLocationRaw, wParam),
-                                    isDown, isUp, pressure, orientation))
-                return false;
+            return handleTouchInput (emulateTouchEventFromPointer (touchInfo.pointerInfo.ptPixelLocationRaw, wParam),
+                                     isDown,
+                                     isUp,
+                                     pressure,
+                                     orientation);
         }
-        else if (pointerType == MouseInputSource::InputSourceType::pen)
+
+        if (pointerType == MouseInputSource::InputSourceType::pen)
         {
             POINTER_PEN_INFO penInfo;
 
-            if (! getPointerPenInfo (GET_POINTERID_WPARAM (wParam), &penInfo))
+            if (! pointerFunctions->getPointerPenInfo (GET_POINTERID_WPARAM (wParam), &penInfo))
                 return false;
 
             const auto pressure = (penInfo.penMask & PEN_MASK_PRESSURE) ? (float) penInfo.pressure / 1024.0f : MouseInputSource::defaultPressure;
@@ -2872,15 +2936,10 @@ private:
             const auto physical = D2DUtilities::toPoint (getPOINTFromLParam (lParam)).toFloat();
             const auto logical = SH::convertPhysicalScreenPointToLogical (physical);
 
-            if (! handlePenInput (penInfo, globalToLocal (logical), pressure, isDown, isUp))
-                return false;
-        }
-        else
-        {
-            return false;
+            return handlePenInput (penInfo, globalToLocal (logical), pressure, isDown, isUp);
         }
 
-        return true;
+        return false;
     }
 
     TOUCHINPUT emulateTouchEventFromPointer (POINT p, WPARAM wParam)
@@ -3327,7 +3386,11 @@ private:
                 if (! Desktop::getInstance().getMainMouseSource().isDragging())
                     modsToSend = modsToSend.withoutMouseButtons();
 
-                doMouseEvent (pos, MouseInputSource::defaultPressure, 0.0f, modsToSend);
+                doMouseEvent (MouseInputSource::InputSourceType::mouse,
+                              pos,
+                              MouseInputSource::defaultPressure,
+                              0.0f,
+                              modsToSend);
             }
 
             if (! isValidPeer (this))
@@ -3498,6 +3561,22 @@ private:
     }
    #endif
 
+    void setWindowsCanUseMultiTouch (bool newUsesMultitouch) override
+    {
+        if (std::exchange (usesMultitouch, newUsesMultitouch) == newUsesMultitouch)
+            return;
+
+        if (newUsesMultitouch)
+            TouchFunctions::get()->registerTouchWindow (hwnd, 0);
+        else
+            TouchFunctions::get()->unregisterTouchWindow (hwnd);
+    }
+
+    bool canWindowsUseMultiTouch() const noexcept override
+    {
+        return usesMultitouch;
+    }
+
     static LRESULT CALLBACK windowProc (HWND h, UINT message, WPARAM wParam, LPARAM lParam)
     {
         // Ensure that non-client areas are scaled for per-monitor DPI awareness v1 - can't
@@ -3618,12 +3697,12 @@ private:
             //==============================================================================
             case WM_NCHITTEST:
             {
-                if ((styleFlags & windowIgnoresMouseClicks) != 0)
+                if ((getStyleFlags() & windowIgnoresMouseClicks) != 0)
                     return HTTRANSPARENT;
 
-                if (! hasTitleBar() && (styleFlags & windowIsTemporary) == 0 && parentToAddTo == nullptr)
+                if (! hasTitleBar() && (getStyleFlags() & windowIsTemporary) == 0 && parentToAddTo == nullptr)
                 {
-                    if ((styleFlags & windowIsResizable) != 0)
+                    if ((getStyleFlags() & windowIsResizable) != 0)
                         if (const auto result = DefWindowProc (h, message, wParam, lParam); HTSIZEFIRST <= result && result <= HTSIZELAST)
                             return result;
 
@@ -3670,7 +3749,7 @@ private:
                     // and if Microsoft's own VS Code doesn't have perfect mouse handling I don't
                     // think we can be expected to either!
 
-                    if ((styleFlags & windowIsResizable) != 0 && ! isKioskMode())
+                    if ((getStyleFlags() & windowIsResizable) != 0 && ! isKioskMode())
                     {
                         const ScopedThreadDPIAwarenessSetter scope { hwnd };
 
@@ -3774,17 +3853,17 @@ private:
 
             //==============================================================================
             case WM_POINTERUPDATE:
-                if (handlePointerInput (wParam, lParam, false, false))
+                if (canUseMultiTouch() && handlePointerInput (wParam, lParam, false, false))
                     return 0;
                 break;
 
             case WM_POINTERDOWN:
-                if (handlePointerInput (wParam, lParam, true, false))
+                if (canUseMultiTouch() && handlePointerInput (wParam, lParam, true, false))
                     return 0;
                 break;
 
             case WM_POINTERUP:
-                if (handlePointerInput (wParam, lParam, false, true))
+                if (canUseMultiTouch() && handlePointerInput (wParam, lParam, false, true))
                     return 0;
                 break;
 
@@ -3830,12 +3909,12 @@ private:
                 return 0;
 
             case WM_TOUCH:
-                if (getTouchInputInfo != nullptr)
+                if (TouchFunctions::get().has_value())
                     return doTouchEvent ((int) wParam, (HTOUCHINPUT) lParam);
 
                 break;
 
-            case 0x119: /* WM_GESTURE */
+            case WM_GESTURE:
                 if (doGestureEvent (lParam))
                     return 0;
 
@@ -4114,7 +4193,7 @@ private:
                 switch (wParam)
                 {
                     case HTCLOSE:
-                        if ((styleFlags & windowHasCloseButton) != 0 && ! sendInputAttemptWhenModalMessage())
+                        if ((getStyleFlags() & windowHasCloseButton) != 0 && ! sendInputAttemptWhenModalMessage())
                         {
                             if (hasTitleBar())
                                 PostMessage (h, WM_CLOSE, 0, 0);
@@ -4124,7 +4203,7 @@ private:
                         return 0;
 
                     case HTMAXBUTTON:
-                        if ((styleFlags & windowHasMaximiseButton) != 0 && ! sendInputAttemptWhenModalMessage())
+                        if ((getStyleFlags() & windowHasMaximiseButton) != 0 && ! sendInputAttemptWhenModalMessage())
                         {
                             if (hasTitleBar())
                                 setFullScreen (! isFullScreen());
@@ -4134,7 +4213,7 @@ private:
                         return 0;
 
                     case HTMINBUTTON:
-                        if ((styleFlags & windowHasMinimiseButton) != 0 && ! sendInputAttemptWhenModalMessage())
+                        if ((getStyleFlags() & windowHasMinimiseButton) != 0 && ! sendInputAttemptWhenModalMessage())
                         {
                             if (hasTitleBar())
                                 setMinimised (true);
@@ -4568,6 +4647,7 @@ private:
     SharedResourcePointer<TopLevelModalDismissBroadcaster> modalDismissBroadcaster;
     IMEHandler imeHandler;
     bool shouldIgnoreModalDismiss = false;
+    bool usesMultitouch = false;
 
     /*  When the user clicks on a window, the window gets sent WM_MOUSEACTIVATE, WM_ACTIVATE,
         and WM_SETFOCUS, before sending a WM_LBUTTONDOWN or other pointer event.
@@ -5534,19 +5614,14 @@ bool detail::MouseInputSourceList::addSource()
 {
     auto numSources = sources.size();
 
-    if (numSources == 0 || canUseMultiTouch())
-    {
-        addSource (numSources, numSources == 0 ? MouseInputSource::InputSourceType::mouse
-                                               : MouseInputSource::InputSourceType::touch);
-        return true;
-    }
-
-    return false;
+    addSource (numSources, numSources == 0 ? MouseInputSource::InputSourceType::mouse
+                                           : MouseInputSource::InputSourceType::touch);
+    return true;
 }
 
 bool detail::MouseInputSourceList::canUseTouch() const
 {
-    return canUseMultiTouch();
+    return true;
 }
 
 Point<float> MouseInputSource::getCurrentRawMousePosition()

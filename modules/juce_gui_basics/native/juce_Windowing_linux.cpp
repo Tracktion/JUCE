@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -46,7 +46,7 @@ public:
         // it's dangerous to create a window on a thread other than the message thread
         JUCE_ASSERT_MESSAGE_MANAGER_IS_LOCKED
 
-        const auto* instance = XWindowSystem::getInstance();
+        auto* instance = XWindowSystem::getInstance();
 
         if (! instance->isX11Available())
             return;
@@ -238,7 +238,7 @@ public:
 
         if (fullScreen != shouldBeFullScreen)
         {
-            const auto usingNativeTitleBar = ((styleFlags & windowHasTitleBar) != 0);
+            const auto usingNativeTitleBar = ((getStyleFlags() & windowHasTitleBar) != 0);
 
             if (usingNativeTitleBar)
                 XWindowSystem::getInstance()->setMaximised (windowH, shouldBeFullScreen);
@@ -304,7 +304,7 @@ public:
     {
         if (auto* otherPeer = dynamic_cast<LinuxComponentPeer*> (other))
         {
-            if (otherPeer->styleFlags & windowIsTemporary)
+            if (otherPeer->getStyleFlags() & windowIsTemporary)
                 return;
 
             setMinimised (false);
@@ -398,7 +398,7 @@ public:
     bool isConstrainedNativeWindow() const
     {
         return constrainer != nullptr
-            && (styleFlags & (windowHasTitleBar | windowIsResizable)) == (windowHasTitleBar | windowIsResizable)
+            && (getStyleFlags() & (windowHasTitleBar | windowIsResizable)) == (windowHasTitleBar | windowIsResizable)
             && ! isKioskMode();
     }
 
@@ -422,7 +422,7 @@ public:
 
     void updateBorderSize()
     {
-        if ((styleFlags & windowHasTitleBar) == 0)
+        if ((getStyleFlags() & windowHasTitleBar) == 0)
         {
             windowBorder = OptionalBorderSize { BorderSize<int>() };
         }
@@ -784,9 +784,12 @@ void Desktop::allowedOrientationsChanged()                          {}
 //==============================================================================
 bool detail::MouseInputSourceList::addSource()
 {
-    if (sources.isEmpty())
+    auto numSources = sources.size();
+
+    if (numSources == 0 || canUseTouch())
     {
-        addSource (0, MouseInputSource::InputSourceType::mouse);
+        addSource (numSources, numSources == 0 ? MouseInputSource::InputSourceType::mouse
+                                               : MouseInputSource::InputSourceType::touch);
         return true;
     }
 
@@ -795,7 +798,7 @@ bool detail::MouseInputSourceList::addSource()
 
 bool detail::MouseInputSourceList::canUseTouch() const
 {
-    return false;
+    return XWindowSystem::getInstance()->canUseMultiTouch();
 }
 
 Point<float> MouseInputSource::getCurrentRawMousePosition()

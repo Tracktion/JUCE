@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -541,7 +541,11 @@ namespace AAXClasses
                #endif
                 {
                     component->setVisible (true);
-                    component->addToDesktop (detail::PluginUtilities::getDesktopFlags (component->pluginEditor.get()), nativeViewToAttachTo);
+                    const auto [flags, usesMultiTouch] = detail::PluginUtilities::getDesktopFlagsAndWindowsMultiTouchMode (component->pluginEditor.get());
+                    component->addToDesktop (flags, nativeViewToAttachTo);
+
+                    if (auto* peer = component->getPeer())
+                        peer->setWindowsCanUseMultiTouch (usesMultiTouch);
 
                     if (ModifierKeyReceiver* modReceiver = dynamic_cast<ModifierKeyReceiver*> (component->getPeer()))
                         modReceiver->setModifierKeyProvider (this);

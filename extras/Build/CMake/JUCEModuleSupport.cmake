@@ -15,7 +15,7 @@
 #  framework to you, and you must discontinue the installation or download
 #  process and cease use of the JUCE framework.
 #
-#  JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+#  JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
 #  JUCE Privacy Policy: https://juce.com/juce-privacy-policy
 #  JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 #
@@ -687,4 +687,13 @@ function(_juce_fixup_module_source_groups)
             set_source_files_properties(${header_files} PROPERTIES HEADER_FILE_ONLY TRUE)
         endforeach()
     endif()
+endfunction()
+
+function(_juce_fixup_unity_property)
+    get_property(all_modules GLOBAL PROPERTY _juce_module_names)
+
+    foreach(module_name IN LISTS all_modules)
+        get_target_property(source_files ${module_name} INTERFACE_JUCE_MODULE_SOURCES)
+        set_source_files_properties(${source_files} PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)
+    endforeach()
 endfunction()

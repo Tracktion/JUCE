@@ -15,7 +15,7 @@
 #  framework to you, and you must discontinue the installation or download
 #  process and cease use of the JUCE framework.
 #
-#  JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+#  JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
 #  JUCE Privacy Policy: https://juce.com/juce-privacy-policy
 #  JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 #
@@ -34,12 +34,7 @@ cmake_minimum_required(VERSION 3.22)
 
 get_property(_juce_initial_global_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
 
-project(JUCE VERSION 8.0.15 LANGUAGES C CXX)
-
-if(NOT (JUCE_IS_TOP_LEVEL OR "C" IN_LIST _juce_initial_global_languages))
-    message(FATAL_ERROR "A C compiler is required to build targets that depend on JUCE. "
-        "Add 'C' to your project's LANGUAGES.")
-endif()
+project(JUCE VERSION 9.0.0 LANGUAGES C CXX)
 
 if(NOT (JUCE_IS_TOP_LEVEL OR "C" IN_LIST _juce_initial_global_languages))
     message(FATAL_ERROR "A C compiler is required to build targets that depend on JUCE. "
@@ -186,10 +181,11 @@ install(FILES "${JUCE_BINARY_DIR}/JUCEConfigVersion.cmake"
               "${JUCE_CMAKE_UTILS_DIR}/PIPConsole.cpp.in"
               "${JUCE_CMAKE_UTILS_DIR}/RecentFilesMenuTemplate.nib"
               "${JUCE_CMAKE_UTILS_DIR}/UnityPluginGUIScript.cs.in"
+              "${JUCE_CMAKE_UTILS_DIR}/bundleplaceholder.mm"
               "${JUCE_CMAKE_UTILS_DIR}/checkBundleSigning.cmake"
               "${JUCE_CMAKE_UTILS_DIR}/copyDir.cmake"
-              "${JUCE_CMAKE_UTILS_DIR}/juce_runtime_arch_detection.cpp"
               "${JUCE_CMAKE_UTILS_DIR}/juce_LinuxSubprocessHelper.cpp"
+              "${JUCE_CMAKE_UTILS_DIR}/juce_runtime_arch_detection.cpp"
         DESTINATION "${JUCE_INSTALL_DESTINATION}")
 
 install(DIRECTORY "${JUCE_CMAKE_UTILS_DIR}/juce_vst3_helper"

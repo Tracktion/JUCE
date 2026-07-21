@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -724,6 +724,7 @@ std::unique_ptr<LowLevelGraphicsContext> Direct2DPixelData::createLowLevelContex
             void endTransparencyLayer() override {}
             void setFill (const FillType&) override {}
             void setOpacity (float) override {}
+            void setImageBlendMode (BlendMode) override {}
             void setInterpolationQuality (Graphics::ResamplingQuality) override {}
             void fillRect (const Rectangle<int>&, bool) override {}
             void fillRect (const Rectangle<float>&) override {}

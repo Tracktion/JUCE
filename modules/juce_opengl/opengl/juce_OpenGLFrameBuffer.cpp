@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -150,7 +150,7 @@ public:
         const ScopeGuard unbinder { [transientState] { transientState->unbind(); }};
 
        #if ! JUCE_ANDROID
-        if (! associatedContext->isCoreProfile())
+        if (associatedContext->getProfile() == OpenGLProfile::compatibility)
             glEnable (GL_TEXTURE_2D);
 
         clearGLError();
@@ -398,11 +398,9 @@ private:
                 gl::glBindRenderbuffer (GL_RENDERBUFFER, depthOrStencilBuffer);
                 jassert (gl::glIsRenderbuffer (depthOrStencilBuffer));
 
-               #if JUCE_OPENGL_ES
-                constexpr auto depthComponentConstant = (GLenum) GL_DEPTH_COMPONENT16;
-               #else
-                constexpr auto depthComponentConstant = (GLenum) GL_DEPTH_COMPONENT;
-               #endif
+                const auto depthComponentConstant = OpenGLHelpers::isOpenGLES()
+                                                  ? (GLenum) GL_DEPTH_COMPONENT16
+                                                  : (GLenum) GL_DEPTH_COMPONENT;
 
                 gl::glRenderbufferStorage (GL_RENDERBUFFER,
                                            (wantsDepthBuffer && wantsStencilBuffer) ? (GLenum) GL_DEPTH24_STENCIL8
