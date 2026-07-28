@@ -525,9 +525,13 @@ static Image createNSWindowSnapshot (NSWindow* nsWindow)
 {
     JUCE_AUTORELEASEPOOL
     {
-        const auto createImageFromCGImage = [&] (CGImageRef cgImage)
+        const auto createImageFromCGImage = [&] (CGImageRef cgImage) -> Image
         {
-            jassert (cgImage != nullptr);
+            // N.B. the capture APIs can hand back a null image (e.g. without Screen
+            // Recording permission), and CGImageGetWidth/CGContextDrawImage will crash
+            // on null, so bail out rather than asserting and carrying on.
+            if (cgImage == nullptr)
+                return {};
 
             const auto width = CGImageGetWidth (cgImage);
             const auto height = CGImageGetHeight (cgImage);
