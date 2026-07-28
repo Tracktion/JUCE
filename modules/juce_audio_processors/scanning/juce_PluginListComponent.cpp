@@ -688,8 +688,8 @@ void PluginListComponent::scanFor (AudioPluginFormat& format, const StringArray&
                                     propertiesToUse,
                                     allowAsync,
                                     numThreads,
-                                    dialogTitle.isNotEmpty() ? dialogTitle : TRANS ("Scanning for plug-ins..."),
-                                    dialogText.isNotEmpty()  ? dialogText  : TRANS ("Searching for all possible plug-in files..."));
+                                    dialogTitle.isNotEmpty() ? dialogTitle : TRANS ("Scanning for plugins..."),
+                                    dialogText.isNotEmpty()  ? dialogText  : TRANS ("Searching for all possible plugin files..."));
 }
 
 bool PluginListComponent::isScanning() const noexcept
