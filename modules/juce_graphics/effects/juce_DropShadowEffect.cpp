@@ -45,6 +45,9 @@ void DropShadow::drawForImage (Graphics& g, const Image& srcImage) const
 {
     jassert (radius > 0);
 
+    if (radius <= 0)
+        return;
+
     if (! srcImage.isValid())
         return;
 
@@ -60,6 +63,9 @@ void DropShadow::drawForImage (Graphics& g, const Image& srcImage) const
 void DropShadow::drawForPath (Graphics& g, const Path& path) const
 {
     jassert (radius > 0);
+
+    if (radius <= 0)
+        return;
 
     auto area = (path.getBounds().getSmallestIntegerContainer() + offset)
             .expanded (radius + 1)

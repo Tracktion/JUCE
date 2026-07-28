@@ -882,6 +882,9 @@ void Direct2DPixelData::applySingleChannelBoxBlurEffectInArea (Rectangle<int> b,
 {
     applyEffectInArea (b, [&] (auto dc, auto input) -> ComSmartPtr<ID2D1Effect>
     {
+        if (radius <= 0)
+            return nullptr;
+
         constexpr FLOAT kernel[] { 1.0f / 9.0f, 2.0f / 9.0f, 3.0f / 9.0f, 2.0f / 9.0f, 1.0f / 9.0f };
 
         ComSmartPtr<ID2D1Effect> begin, end;
