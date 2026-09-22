@@ -887,6 +887,11 @@ struct AlsaMidiHelpers
             return midiVersion;
         }
 
+        [[nodiscard]] auto lock()
+        {
+            return ScopedLock { mutex };
+        }
+
     private:
         Port (std::shared_ptr<Client> c,
               int p,
@@ -934,6 +939,7 @@ struct AlsaMidiHelpers
             disconnectCallbacks.call ([&] (auto& c) { c.disconnected(); });
         }
 
+        CriticalSection mutex;
         std::shared_ptr<Client> client;
         int portId = -1; // A negative portId indicates this is a special UMP virtual port
         std::optional<ump::IOKind> direction; // nullopt == bidirectional
@@ -1046,6 +1052,8 @@ struct AlsaMidiHelpers
 
         bool send (ump::Iterator b, ump::Iterator e) override
         {
+            const auto lock = port->lock();
+
             if (snd_seq_ump_event_output_direct != nullptr && port->getMidiVersion() != SND_SEQ_CLIENT_LEGACY_MIDI)
             {
                 for (const auto& v : makeRange (b, e))
@@ -1062,6 +1070,7 @@ struct AlsaMidiHelpers
 
         ump::EndpointId getEndpointId() const override
         {
+            const auto lock = port->lock();
             return port->getId();
         }
 

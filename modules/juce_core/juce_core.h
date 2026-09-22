@@ -44,7 +44,7 @@
 
   ID:                 juce_core
   vendor:             juce
-  version:            9.0.1
+  version:            9.0.2
   name:               JUCE core classes
   description:        The essential set of basic JUCE classes, as required by all the other JUCE modules. Includes text, container, memory, threading and i/o functionality.
   website:            http://www.juce.com/juce
@@ -348,6 +348,8 @@ JUCE_END_IGNORE_WARNINGS_MSVC
 #include "threads/juce_Thread.h"
 #include "threads/juce_HighResolutionTimer.h"
 #include "threads/juce_ThreadLocalValue.h"
+#include "threads/juce_ThreadPoolJob.h"
+#include "detail/juce_ThreadPoolLambdaJob.h"
 #include "threads/juce_ThreadPool.h"
 #include "threads/juce_TimeSliceThread.h"
 #include "threads/juce_ReadWriteLock.h"

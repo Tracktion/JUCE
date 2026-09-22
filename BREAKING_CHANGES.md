@@ -1,6 +1,106 @@
 # JUCE breaking changes
 
+# Version 9.0.2
+
+## Change
+
+ThreadPool::addJob no longer provides separate std::function overloads for
+void and ThreadPoolJob::JobStatus return types. It now accepts a single
+callable template parameter that must return exactly void or
+ThreadPoolJob::JobStatus.
+
+**Possible Issues**
+
+Code that previously passed a callable returning a type other than void or
+ThreadPoolJob::JobStatus (for example int or bool) will fail to compile. The
+return value was previously discarded via conversion to std::function<void()>.
+
+**Workaround**
+
+Change the callable so that it returns void, or returns a
+ThreadPoolJob::JobStatus to control whether the job should run again.
+
+**Rationale**
+
+The previous overloads were ambiguous for lambdas returning
+ThreadPoolJob::JobStatus, because std::function<void()> can be constructed from
+callables with non-void return types. Constraining the accepted return types
+removes that ambiguity and rejects accidental misuse at compile time.
+
+
+## Change
+
+The AudioDeviceSelectorComponent::getMidiInputSelectorListBox function has been
+removed.
+
+**Possible Issues**
+
+Code using the removed function will fail to compile.
+
+**Workaround**
+
+There is no workaround.
+
+**Rationale**
+
+Prior to this change the MidiInputSelectorListBox was not accessible when using
+screen reader software. Even if we reworked the component and kept the ListBox
+base class, it would've been a poor fit conceptually for the MidiInputSelector,
+and it would have made the interaction with screen readers unnecessarily
+complex. Hence the ListBox base class was removed, and it's no longer possible
+to return a ListBox pointer to the new MidiInputSelector object.
+
+
 # Version 9.0.1
+
+## Change
+
+OpenGLImageType::create() now honours a request for an Image::SingleChannel
+image. Previously the requested format was ignored, and the returned image was
+always an Image::ARGB image backed by an OpenGL framebuffer.
+
+**Possible Issues**
+
+OpenGLImageType::getFrameBufferFrom() returns nullptr for single channel
+images, where it previously returned a valid framebuffer. Such images also
+report Image::SingleChannel rather than Image::ARGB from Image::getFormat().
+
+**Workaround**
+
+Request an Image::ARGB image explicitly if a framebuffer-backed image is
+required.
+
+**Rationale**
+
+The format requested when creating an image was previously ignored, so an image
+could report a different format to the one that was asked for. This caused
+rendering issues in places where a real single channel image was needed, and
+OpenGLImageType was the only JUCE image type that did not produce a real single
+channel format.
+
+
+## Change
+
+OpenGLContext::setImageCacheSize() now interprets its argument as a number of
+bytes, as documentated. Previously the value was compared against a pixel count,
+so the effective cache was four times larger than requested. The default cache
+size has been raised from 8 MB to 32 MB so that the default behaviour is
+unchanged.
+
+**Possible Issues**
+
+Code calling setImageCacheSize() with an explicit value will end up with an
+image cache four times smaller than before.
+
+**Workaround**
+
+Multiply the previously-passed value by four.
+
+**Rationale**
+
+The documented contract was expressed in bytes, but the implementation applied
+the value as a number of pixels.
+
 
 ## Change
 
@@ -65,6 +165,27 @@ requirements on the directory structure.
 
 
 # Version 9.0.0
+
+## Change
+
+libxi-dev is now a required dependency for building JUCE on Linux, unless the
+JUCE_USE_XINPUT=0 preprocessor definition is set.
+
+**Possible Issues**
+
+Applications that don't disable XInput will fail to compile unless the
+dependency is met.
+
+**Workaround**
+
+Install libxi-dev.
+
+**Rationale**
+
+In order to add multi-touch support on Linux, the XInput2 extension is
+required. The libxi-dev package provides the necessary headers and libraries
+for this extension.
+
 
 ## Change
 

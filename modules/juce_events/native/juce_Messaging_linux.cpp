@@ -81,18 +81,14 @@ public:
         ScopedLock sl (lock);
         queue.add (msg);
 
-        if (bytesInSocket >= maxBytesInSocketQueue)
+        if (! socketSignalled)
         {
-            // Is the message thread overloaded by tasks taking too long?
-            jassertfalse;
-            return;
+            socketSignalled = true;
+
+            ScopedUnlock ul (lock);
+            unsigned char x = 0xff;
+            [[maybe_unused]] auto numBytes = write (getWriteHandle(), &x, 1);
         }
-
-        bytesInSocket++;
-
-        ScopedUnlock ul (lock);
-        unsigned char x = 0xff;
-        [[maybe_unused]] auto numBytes = write (getWriteHandle(), &x, 1);
     }
 
     //==============================================================================
@@ -103,8 +99,7 @@ private:
     ReferenceCountedArray <MessageManager::MessageBase> queue;
 
     int msgpipe[2];
-    int bytesInSocket = 0;
-    static constexpr int maxBytesInSocketQueue = 128;
+    bool socketSignalled = false;
 
     int getWriteHandle() const noexcept  { return msgpipe[0]; }
     int getReadHandle() const noexcept   { return msgpipe[1]; }
@@ -112,17 +107,18 @@ private:
     MessageManager::MessageBase::Ptr popNextMessage (int fd) noexcept
     {
         const ScopedLock sl (lock);
+        auto msg = queue.removeAndReturn (0);
 
-        if (bytesInSocket > 0)
+        if (queue.isEmpty() && socketSignalled)
         {
-            --bytesInSocket;
+            socketSignalled = false;
 
             ScopedUnlock ul (lock);
             unsigned char x;
             [[maybe_unused]] auto numBytes = read (fd, &x, 1);
         }
 
-        return queue.removeAndReturn (0);
+        return msg;
     }
 };
 
