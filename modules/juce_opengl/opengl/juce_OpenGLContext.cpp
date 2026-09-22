@@ -217,7 +217,7 @@ public:
         activator.activate (context);
 
        #if JUCE_ANDROID
-        nativeContext->notifyWillPause();
+        context.nativeContextListeners.call ([] (auto& l) { l.contextWillPause(); });
        #endif
 
         if (context.renderer != nullptr)
@@ -309,11 +309,11 @@ public:
 
         auto previousFrameBufferTarget = OpenGLFrameBuffer::getCurrentFrameBufferTarget();
         cachedImageFrameBuffer.makeCurrentRenderingTarget();
-        auto imageH = cachedImageFrameBuffer.getHeight();
+        const auto textureH = cachedImageFrameBuffer.getTextureHeight();
 
         for (auto& r : list)
         {
-            glScissor (r.getX(), imageH - r.getBottom(), r.getWidth(), r.getHeight());
+            glScissor (r.getX(), textureH - r.getBottom(), r.getWidth(), r.getHeight());
             glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         }
 
@@ -435,7 +435,7 @@ public:
                 glViewport (0, 0, viewportArea.getWidth(), viewportArea.getHeight());
                 context.currentRenderScale = currentAreaAndScale.scale;
                 context.renderer->renderOpenGL();
-                clearGLError();
+                clearDebugGLError();
             }
 
             if (context.renderComponents)
@@ -592,7 +592,8 @@ public:
         glBindTexture (GL_TEXTURE_2D, cachedImageFrameBuffer.getTextureID());
 
         const Rectangle<int> cacheBounds (cachedImageFrameBuffer.getWidth(), cachedImageFrameBuffer.getHeight());
-        context.copyTexture (cacheBounds, cacheBounds, cacheBounds.getWidth(), cacheBounds.getHeight(), false);
+        const Rectangle<int> textureBounds (cachedImageFrameBuffer.getTextureWidth(), cachedImageFrameBuffer.getTextureHeight());
+        context.copyTexture (cacheBounds, textureBounds, cacheBounds.getWidth(), cacheBounds.getHeight(), false);
         glBindTexture (GL_TEXTURE_2D, 0);
         JUCE_CHECK_OPENGL_ERROR
     }
@@ -699,7 +700,7 @@ public:
         {
             JUCE_CHECK_OPENGL_ERROR
             shadersAvailable = OpenGLShaderProgram::getLanguageVersion() > 0;
-            clearGLError();
+            OpenGLHelpers::resetErrorState();
         }
         else
         {
@@ -712,7 +713,7 @@ public:
             context.renderer->newOpenGLContextCreated();
 
        #if JUCE_ANDROID
-        nativeContext->notifyDidResume();
+        context.nativeContextListeners.call ([] (auto& l) { l.contextDidResume(); });
        #endif
 
         return InitResult::success;
@@ -749,7 +750,7 @@ public:
             NativeContext::Locker locker (*nativeContext);
 
             (*work) (context);
-            clearGLError();
+            clearDebugGLError();
         }
     }
 
@@ -1139,7 +1140,7 @@ public:
         stop();
         detail::ComponentHelpers::releaseAllCachedImageResources (comp);
         comp.setCachedComponentImage (nullptr);
-        context.nativeContext = nullptr;
+        context.clearNativeContext();
     }
 
     void componentMovedOrResized (bool /*wasMoved*/, bool /*wasResized*/) override
@@ -1444,7 +1445,7 @@ void OpenGLContext::detach()
         attachment.reset();
     }
 
-    nativeContext = nullptr;
+    clearNativeContext();
 }
 
 bool OpenGLContext::isAttached() const noexcept
@@ -1768,7 +1769,7 @@ void OpenGLContext::copyTexture (const Rectangle<int>& targetClipArea,
         }
         else
         {
-            clearGLError();
+            OpenGLHelpers::resetErrorState();
         }
     }
     else
@@ -1779,14 +1780,11 @@ void OpenGLContext::copyTexture (const Rectangle<int>& targetClipArea,
     JUCE_CHECK_OPENGL_ERROR
 }
 
-void OpenGLContext::NativeContextListener::addListener (OpenGLContext& ctx, NativeContextListener& l)
+void OpenGLContext::clearNativeContext()
 {
-    ctx.nativeContext->addListener (l);
-}
-
-void OpenGLContext::NativeContextListener::removeListener (OpenGLContext& ctx, NativeContextListener& l)
-{
-    ctx.nativeContext->removeListener (l);
+    nativeContextListeners.call ([] (auto& l) { l.contextWillBeDestroyed(); });
+    nativeContextListeners.clear();
+    nativeContext = nullptr;
 }
 
 #if JUCE_ANDROID

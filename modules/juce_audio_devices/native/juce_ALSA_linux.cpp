@@ -520,6 +520,9 @@ public:
         sampleRate = newSampleRate;
         bufferSize = newBufferSize;
 
+        if (inputChannels.getHighestBit() >= 0)
+            ensureMinimumNumBitsSet (inputChannels, (int) minChansIn);
+
         int maxInputsRequested = inputChannels.getHighestBit() + 1;
         maxInputsRequested = jmax ((int) minChansIn, jmin ((int) maxChansIn, maxInputsRequested));
 
@@ -564,8 +567,6 @@ public:
                 inputDevice.reset();
                 return;
             }
-
-            ensureMinimumNumBitsSet (currentInputChans, (int) minChansIn);
 
             if (! inputDevice->setParameters ((unsigned int) sampleRate,
                                               jlimit ((int) minChansIn, (int) maxChansIn, currentInputChans.getHighestBit() + 1),
@@ -629,6 +630,17 @@ public:
 
         if (outputDevice != nullptr && JUCE_ALSA_FAILED (snd_pcm_prepare (outputDevice->handle)))
             return;
+
+        // When using snd_pcm_link the first read on the input device will also start the output
+        // device, immediately consuming the same number of samples from the output buffer.
+        if (outputDevice != nullptr && inputDevice != nullptr)
+        {
+            AudioBuffer<float> silence (outputChannelBuffer.getNumChannels(), outputLatency);
+            silence.clear();
+
+            if (! outputDevice->writeToOutputDevice (silence, outputLatency))
+                JUCE_ALSA_LOG ("Failed to pre-fill the output device buffer");
+        }
 
         startThread (Priority::high);
 

@@ -3,6 +3,19 @@
 This file lists the more notable headline features. For more detailed info
 about changes and bugfixes please see the git log and BREAKING_CHANGES.md.
 
+## Version 9.0.2
+
+  - Enabled MP3AudioFormat by default
+  - Fixed reading MP3 VBR files with padding after the ID3v2 header
+  - Fixed parsing WAV files with a missing final pad byte
+  - Improved OpenGL rendering performance
+  - Fixed CoreAudio default sample rate and buffer size selection
+  - Fixed CoreAudio Multi-Output device handling
+  - Fixed some VST3 hosting issues
+  - Fixed a UMP sysex7 timestamp issue
+  - Fixed Projucer weak-linking of frameworks in multi-target Xcode projects
+  - Added a SECURITY.md and a software bill of materials
+
 ## Version 9.0.1
 
   - Added a new TypeScript npm package for WebView integrarion

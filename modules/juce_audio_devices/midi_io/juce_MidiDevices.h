@@ -378,15 +378,15 @@ public:
 
     //==============================================================================
     /** Sends out a MIDI message immediately. */
-    void sendMessageNow (const MidiMessage& message)
+    bool sendMessageNow (const MidiMessage& message)
     {
-        convertAndSend (mainPackets, Span { &message, 1 });
+        return convertAndSend (mainPackets, Span { &message, 1 });
     }
 
     /** Sends out a sequence of MIDI messages immediately. */
-    void sendBlockOfMessagesNow (const MidiBuffer& buffer)
+    bool sendBlockOfMessagesNow (const MidiBuffer& buffer)
     {
-        convertAndSend (mainPackets, buffer);
+        return convertAndSend (mainPackets, buffer);
     }
 
     /** This lets you supply a block of messages that will be sent out at some point
@@ -455,7 +455,7 @@ private:
                 ump::LegacyVirtualOutput);
 
     template <typename Range>
-    void convertAndSend (ump::Packets& packets, Range&& range)
+    bool convertAndSend (ump::Packets& packets, Range&& range)
     {
         packets.clear();
 
@@ -467,7 +467,7 @@ private:
             });
         });
 
-        connection.send (packets.begin(), packets.end());
+        return connection.send (packets.begin(), packets.end());
     }
 
     //==============================================================================

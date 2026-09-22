@@ -520,6 +520,12 @@ static double getScaleFactorForWindow (HWND h)
     return (double) GetDpiForWindow (h) / USER_DEFAULT_SCREEN_DPI;
 }
 
+static HWND getParent (HWND hwnd)
+{
+    const auto p = GetAncestor (hwnd, GA_PARENT);
+    return p != GetDesktopWindow() ? p : nullptr;
+}
+
 static RECT getWindowScreenRect (HWND hwnd)
 {
     ScopedThreadDPIAwarenessSetter setter { hwnd };
@@ -529,11 +535,11 @@ static RECT getWindowScreenRect (HWND hwnd)
     return rect;
 }
 
-static RECT getWindowClientRect (HWND hwnd)
+static RECT getWindowRectInParent (HWND hwnd)
 {
     auto rect = getWindowScreenRect (hwnd);
 
-    if (auto parentH = GetParent (hwnd))
+    if (auto parentH = getParent (hwnd))
     {
         ScopedThreadDPIAwarenessSetter setter { hwnd };
         MapWindowPoints (HWND_DESKTOP, parentH, (LPPOINT) &rect, 2);
@@ -862,7 +868,7 @@ public:
 
     static void updateLayeredWindow (HDC sourceHdc, HWND hwnd, Point<int> pt, float constantAlpha)
     {
-        const auto windowBounds = getWindowScreenRect (hwnd);
+        const auto windowBounds = getWindowRectInParent (hwnd);
 
         auto p = D2DUtilities::toPOINT (pt);
         POINT pos = { windowBounds.left, windowBounds.top };
@@ -1395,7 +1401,7 @@ public:
             return snapped;
         }
 
-        auto localBounds = D2DUtilities::toRectangle (getWindowClientRect (hwnd));
+        auto localBounds = D2DUtilities::toRectangle (getWindowRectInParent (hwnd));
 
         return (localBounds.toDouble() / getPlatformScaleFactor()).toNearestInt();
     }
@@ -1944,7 +1950,7 @@ public:
        #if ! JUCE_WIN_PER_MONITOR_DPI_AWARE
         return 1.0;
        #else
-        if (auto* parentHWND = GetParent (hwnd))
+        if (auto* parentHWND = getParent (hwnd))
         {
             if (auto* parentPeer = getOwnerOfWindow (parentHWND))
                 return parentPeer->getPlatformScaleFactor();
@@ -2613,6 +2619,16 @@ private:
         if (canUseMultiTouch() && (isTouch || areOtherTouchSourcesActive()))
             return;
 
+        // If this is the first event after receiving both a MOUSEACTIVATE and a SETFOCUS, then
+        // process the postponed focus update.
+        if (std::exchange (mouseActivateFlags, (uint8_t) 0) == (gotMouseActivate | gotSetFocus))
+        {
+            handleSetFocus();
+
+            if (! isValidPeer (this))
+                return;
+        }
+
         if (GetCapture() != hwnd)
             SetCapture (hwnd);
 
@@ -2626,11 +2642,6 @@ private:
 
             doMouseEvent (inputSourceType, getPointFromLocalLParam (lParam), MouseInputSource::defaultPressure);
         }
-
-        // If this is the first event after receiving both a MOUSEACTIVATE and a SETFOCUS, then
-        // process the postponed focus update.
-        if (std::exchange (mouseActivateFlags, (uint8_t) 0) == (gotMouseActivate | gotSetFocus))
-            handleSetFocus();
     }
 
     void doMouseUp (Point<float> position, const WPARAM wParam, bool adjustCapture = true)
@@ -2805,7 +2816,7 @@ private:
     LRESULT doTouchEvent (const int numInputs, HTOUCHINPUT eventHandle)
     {
         if ((getStyleFlags() & windowIgnoresMouseClicks) != 0)
-            if (auto* parent = getOwnerOfWindow (GetParent (hwnd)))
+            if (auto* parent = getOwnerOfWindow (getParent (hwnd)))
                 if (parent != this)
                     return parent->doTouchEvent (numInputs, eventHandle);
 
@@ -3183,7 +3194,7 @@ private:
 
     void forwardMessageToParent (UINT message, WPARAM wParam, LPARAM lParam) const
     {
-        if (HWND parentH = GetParent (hwnd))
+        if (HWND parentH = getParent (hwnd))
             PostMessage (parentH, message, wParam, lParam);
     }
 
@@ -3663,6 +3674,9 @@ private:
                 // painting, so log the click ourselves and only defer to DefWindowProc once the
                 // mouse moves with the button held.
                 captionMouseDown = lParam;
+                // We still want to raise the window if the caption is clicked. This is normally
+                // handled by DefWindowProc but we're bypassing that.
+                SetWindowPos (hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                 return 0;
         }
 
@@ -4278,23 +4292,7 @@ private:
         const auto borderSize = findPhysicalBorderSize().value_or (BorderSize<int>{});
         auto newBounds = borderSize.addedTo (bounds);
 
-        if (getTransparencyKind() == TransparencyKind::perPixel)
-        {
-            if (auto parentHwnd = GetParent (hwnd))
-            {
-                const auto parentRect = (D2DUtilities::toRectangle (getWindowScreenRect (parentHwnd)).toFloat() / getPlatformScaleFactor()).toNearestInt();
-                newBounds += parentRect.getPosition();
-            }
-        }
-
-        const auto oldBounds = std::invoke ([this]
-        {
-            ScopedThreadDPIAwarenessSetter setter { hwnd };
-            RECT result;
-            GetWindowRect (hwnd, &result);
-            return D2DUtilities::toRectangle (result);
-        });
-
+        const auto oldBounds = D2DUtilities::toRectangle (getWindowRectInParent (hwnd));
         const bool hasMoved = (oldBounds.getPosition() != bounds.getPosition());
         const bool hasResized = (oldBounds.getWidth() != bounds.getWidth()
                                   || oldBounds.getHeight() != bounds.getHeight());
@@ -4565,7 +4563,7 @@ private:
         if (outer == inner)
             return true;
 
-        return isAncestor (outer, GetAncestor (inner, GA_PARENT));
+        return isAncestor (outer, getParent (inner));
     }
 
     void windowShouldDismissModals (HWND originator)
@@ -4979,9 +4977,9 @@ private:
         {
             auto& info = *(ChildWindowClippingInfo*) context;
 
-            if (GetParent (hwnd) == info.peer->getHWND())
+            if (getParent (hwnd) == info.peer->getHWND())
             {
-                auto clip = D2DUtilities::toRectangle (getWindowClientRect (hwnd));
+                auto clip = D2DUtilities::toRectangle (getWindowRectInParent (hwnd));
 
                 info.clip->subtract (clip - info.origin);
 

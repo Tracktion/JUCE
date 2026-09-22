@@ -2370,6 +2370,10 @@ function(juce_add_pip header)
         list(APPEND extra_target_args PLUGINHOST_AU TRUE)
     endif()
 
+    if("JUCE_USE_WINDOWS_MIDI_SERVICES=1" IN_LIST pip_moduleflags)
+        list(APPEND extra_target_args NEEDS_WINDOWS_MIDI_SERVICES TRUE)
+    endif()
+
     if("JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1" IN_LIST pip_moduleflags)
         list(APPEND extra_target_args NEEDS_WEBVIEW2 TRUE)
     endif()

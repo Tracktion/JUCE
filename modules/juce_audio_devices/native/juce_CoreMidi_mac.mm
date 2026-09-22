@@ -1940,6 +1940,7 @@ struct CoreMidiHelpers
     public:
         bool send (ump::Iterator b, ump::Iterator e)
         {
+            const ScopedLock lock { mutex };
             return output.send (connection.portAndEndpoint, b, e);
         }
 
@@ -2040,6 +2041,7 @@ struct CoreMidiHelpers
 
         Connection connection;
         OutputToUse output;
+        CriticalSection mutex;
     };
 
     class InputImplNative : public ump::Input::Impl::Native,
