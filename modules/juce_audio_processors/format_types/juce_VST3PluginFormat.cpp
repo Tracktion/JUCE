@@ -254,7 +254,6 @@ struct VST3PluginWindow final : public AudioProcessorEditor,
         warnOnFailure (view->setFrame (this));
         view->queryInterface (IPlugViewContentScaleSupport::iid, (void**) &scaleInterface);
 
-        setContentScaleFactor();
         resizeToFit();
 
         setResizable (view->canResize() == kResultTrue, false);
@@ -327,7 +326,11 @@ private:
         auto rect = componentToVST3Rect (bounds);
 
         auto constrainedRect = rect;
-        view->checkSizeConstraint (&constrainedRect);
+
+        if (view->canResize() == kResultTrue)
+            view->checkSizeConstraint (&constrainedRect);
+        else
+            view->getSize (&constrainedRect);
 
         // Prevent inadvertent window growth while dragging; see componentMovedOrResized below
         if (constrainedRect.getWidth() != rect.getWidth() || constrainedRect.getHeight() != rect.getHeight())
@@ -487,6 +490,11 @@ private:
 
             if (attachedResult == kResultOk)
                 attachedCalled = true;
+
+            if (auto* peer = getPeer())
+            {
+                nativeScaleFactor = (float) peer->getPlatformScaleFactor();
+            }
 
             updatePluginScale();
 
