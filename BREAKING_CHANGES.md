@@ -4,6 +4,94 @@
 
 ## Change
 
+XmlDocument now rejects documents in which elements are nested more than 256
+levels deep, in which entity references are nested more than 40 levels deep,
+or which build more than 8 MB of text while expanding entities when that is
+also more than 100 times the size of the document.
+
+**Possible Issues**
+
+Such documents will fail to parse, with getLastParseError() reporting
+"elements nested too deeply", "entities nested too deeply" or "entity
+expansion too large". Documents containing entities that refer to themselves,
+which previously crashed the parser, now fail with "recursive entity
+reference".
+
+**Workaround**
+
+Restructure the document so that it stays within these limits.
+
+**Rationale**
+
+The parser recurses once for each level of nesting, and previously expanded
+entities without limit. A malicious document could use either to crash an
+application or to exhaust its memory. These limits match those used by libxml2
+and expat, and are far beyond anything a real document needs.
+
+
+## Change
+
+XmlDocument no longer loads external DTD subsets or external parameter
+entities unless an InputSource has been supplied with setInputSource().
+
+**Possible Issues**
+
+Documents created from a File that rely on entity definitions held in a
+separate file, referenced through a SYSTEM identifier in their DOCTYPE
+declaration, will have those entities left unexpanded, and getLastParseError()
+will report an unknown entity. Documents parsed from a string were already
+treated this way.
+
+**Workaround**
+
+For documents from a trusted source, supply an input source explicitly:
+
+    XmlDocument document (file);
+    document.setInputSource (new FileInputSource (file));
+
+Otherwise, move the entity definitions into the document's internal DTD
+subset, or substitute the entities before parsing.
+
+**Rationale**
+
+A document could name any file as its external subset, and the parser would
+read it through the FileInputSource created for the document's File, which
+accepts absolute paths and parent-directory references. A malicious document
+could use this to read arbitrary files on the user's machine, so these
+references are now only followed through an input source that the caller has
+chosen to provide.
+
+
+## Change
+
+ZipFile::uncompressTo and ZipFile::uncompressEntry now refuse to create a
+symbolic link whose target does not stay inside the target directory, and fail
+an entry that holds more data than the size recorded in the archive's central
+directory.
+
+**Possible Issues**
+
+Archives containing symbolic links to absolute paths, to locations above the
+target directory, or to paths that contain ".." after a named component will
+no longer extract completely. The same applies to archives whose central
+directory understates the size of an entry.
+
+**Workaround**
+
+Extract the affected entries with createStreamForEntry() and handle them in
+application code.
+
+**Rationale**
+
+A symbolic link created from an untrusted archive could point anywhere on the
+user's machine, and anything that later opened or ran a path inside the
+extracted tree could be redirected outside it. Without a check against the
+recorded size, a small archive could also fill the disk, and callers had no way
+to bound the space that extraction would use.
+
+
+## Change
+
 NativeMessageBox::show and NativeMessageBox::showAsync have been renamed
 to showForOptions and showForOptionsAsync respectively.
 
