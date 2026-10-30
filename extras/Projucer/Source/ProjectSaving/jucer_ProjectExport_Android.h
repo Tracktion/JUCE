@@ -157,7 +157,7 @@ public:
           androidKeyStorePass                  (settings, Ids::androidKeyStorePass,                  getUndoManager(), "android"),
           androidKeyAlias                      (settings, Ids::androidKeyAlias,                      getUndoManager(), "androiddebugkey"),
           androidKeyAliasPass                  (settings, Ids::androidKeyAliasPass,                  getUndoManager(), "android"),
-          gradleVersion                        (settings, Ids::gradleVersion,                        getUndoManager(), "8.14.5"),
+          gradleVersion                        (settings, Ids::gradleVersion,                        getUndoManager(), "9.5.1"),
           gradleToolchain                      (settings, Ids::gradleToolchain,                      getUndoManager(), "clang"),
           gradleClangTidy                      (settings, Ids::gradleClangTidy,                      getUndoManager(), false),
           androidPluginVersion                 (settings, Ids::androidPluginVersion,                 getUndoManager(), "8.13.2"),
@@ -712,10 +712,10 @@ private:
         mo << "        }"                                                                      << newLine;
         mo << "    }"                                                                          << newLine;
 
-        // Language version 8 (or lower) is required for compatibility with Android 24
+        // The DEX compiler desugars Java 17 language features for every supported minSdk
         mo << "    compileOptions {"                                                           << newLine;
-        mo << "        sourceCompatibility = JavaVersion.VERSION_1_8"                          << newLine;
-        mo << "        targetCompatibility = JavaVersion.VERSION_1_8"                          << newLine;
+        mo << "        sourceCompatibility = JavaVersion.VERSION_17"                           << newLine;
+        mo << "        targetCompatibility = JavaVersion.VERSION_17"                           << newLine;
         mo << "    }"                                                                          << newLine;
 
         mo << getAndroidSigningConfig()                                                        << newLine;
@@ -813,8 +813,8 @@ private:
         if (! isLibrary())
             mo << "        applicationId(\"" << bundleIdentifier << "\")"            << newLine;
 
-        mo << "        minSdkVersion(" << minSdkVersion << ')'                       << newLine;
-        mo << "        targetSdkVersion(" << targetSdkVersion << ')'                 << newLine;
+        mo << "        minSdk = " << minSdkVersion                                   << newLine;
+        mo << "        targetSdk = " << targetSdkVersion                             << newLine;
 
         mo << "        externalNativeBuild {"                                        << newLine;
         mo << "            cmake {"                                                  << newLine;
