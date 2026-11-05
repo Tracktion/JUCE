@@ -368,16 +368,27 @@ public:
             [parent removeChildWindow: window];
     }
 
+    // A child ordered below its parent has to share the parent's level, since the window server
+    // orders windows by level first
+    static void addChildWindowKeepingLevel (NSWindow* parent, NSWindow* child, NSWindowOrderingMode ordered)
+    {
+        const auto level = [child level];
+        [parent addChildWindow: child ordered: ordered];
+
+        if (ordered == NSWindowAbove)
+            [child setLevel: jmax (level, [parent level])];
+    }
+
     // AppKit keeps child windows in the order they were attached, so changing the order means
     // reattaching every sibling in the new order.
     static void reattachChildWindows (NSWindow* parent, NSArray<NSWindow*>* newOrder)
     {
         for (NSWindow* child in newOrder)
         {
-            if (getOwner (child) != nullptr)
+            if (auto* owner = getOwner (child))
             {
                 [parent removeChildWindow: child];
-                [parent addChildWindow: child ordered: NSWindowAbove];
+                addChildWindowKeepingLevel (parent, child, owner->orderedBelowParent ? NSWindowBelow : NSWindowAbove);
             }
         }
     }
@@ -399,7 +410,7 @@ public:
         detachFromParentWindow (window);
 
         if (parent != nil)
-            [parent addChildWindow: window ordered: NSWindowAbove];
+            addChildWindowKeepingLevel (parent, window, orderedBelowParent ? NSWindowBelow : NSWindowAbove);
 
         updateOffsetFromParentWindow();
     }
@@ -426,7 +437,12 @@ public:
             if (shouldBeVisible)
             {
                 ++insideToFrontCall;
-                [window orderFront: nil];
+
+                if (auto* parent = orderedBelowParent ? findParentWindow (*this, window) : nil)
+                    [window orderWindow: NSWindowBelow relativeTo: [parent windowNumber]];
+                else
+                    [window orderFront: nil];
+
                 --insideToFrontCall;
                 attachToParentWindow();
                 handleBroughtToFront();
@@ -717,6 +733,7 @@ public:
         if (window != nil && component.isVisible())
         {
             ++insideToFrontCall;
+            orderedBelowParent = false;
 
             if (makeActiveWindow && ! inBecomeKeyWindow && [window canBecomeKeyWindow])
                 [window makeKeyAndOrderFront: nil];
@@ -767,19 +784,29 @@ public:
                     [view release];
                 }
             }
+            else if (otherPeer->window == findParentWindow (*this, window))
+            {
+                if (std::exchange (orderedBelowParent, true) && [window parentWindow] == otherPeer->window)
+                    return;
+
+                if (component.isVisible())
+                {
+                    detachFromParentWindow (window);
+                    attachToParentWindow();
+                }
+            }
             else if (component.isVisible())
             {
-                // A child stays above its parent, so going behind the parent means going behind
-                // every sibling instead.
+                // Going behind a sibling means reattaching the children in the new order
                 if (auto* parent = [window parentWindow])
                 {
-                    if (otherPeer->window == parent || [otherPeer->window parentWindow] == parent)
+                    if ([otherPeer->window parentWindow] == parent)
                     {
                         if (NSArray<NSWindow*>* children = [parent childWindows])
                         {
                             NSMutableArray<NSWindow*>* order = [NSMutableArray arrayWithArray: children];
                             [order removeObject: window];
-                            [order insertObject: window atIndex: otherPeer->window == parent ? 0 : [order indexOfObject: otherPeer->window]];
+                            [order insertObject: window atIndex: [order indexOfObject: otherPeer->window]];
                             reattachChildWindows (parent, order);
                         }
                     }
@@ -1877,6 +1904,7 @@ public:
    #endif
     NSUniquePtr<NSEvent> keyEventBeingHandled;
     bool isFirstLiveResize = false, viewCannotHandleEvent = false;
+    bool orderedBelowParent = false;
     bool isStretchingTop = false, isStretchingLeft = false, isStretchingBottom = false, isStretchingRight = false;
     bool windowRepresentsFile = false;
     bool isAlwaysOnTop = false, wasAlwaysOnTop = false, inBecomeKeyWindow = false;
@@ -2251,7 +2279,7 @@ private:
                     if (! storedLevel.has_value())
                         storedLevel = [window level];
 
-                    return NSModalPanelWindowLevel;
+                    return jmax (*storedLevel, NSModalPanelWindowLevel);
                 }
             }
 
